@@ -413,13 +413,14 @@ real-estate-price-prediction/
 │       │   ├── __init__.py         ✔
 │       │   ├── transformations.py  ✔ (selección, target log, ordinal, imputación)
 │       │   └── pipeline.py         ✔ (orquestador construir_features + splits)
-│       ├── models/                ✔ entrenamiento.py (baseline, XGBoost, sin fuga)
+│       ├── models/                ✔ entrenamiento.py (baseline, XGBoost) + modelos_lineales.py
+│       │                             (Lasso/Ridge con escalado, roadmap fase 4, sin fuga)
 │       ├── explainability/        ✔ shap_analysis.py (SHAP: valores, base,
 │       │                             figuras, guardado)
 │       ├── evaluacion/            ✔ analisis.py (métricas detalladas, residuos,
 │       │                             error por segmento, sesgo por rango)
 │       ├── tracking/              ✔ experimentos.py (MLflow: params, métricas,
-│       │                             artefactos, Model Registry)
+│       │                             artefactos, Model Registry; registrar_lineales)
 │       ├── serving/               ✔ fase 10: modelo.py (ModeloPrediccion),
 │       │                             persistencia.py (guardar/cargar bundle)
 │       ├── api/                   ✔ fase 10: app.py (FastAPI, /health + /predict),
@@ -432,13 +433,14 @@ real-estate-price-prediction/
 │   ├── curate.py                   ✔ (entry point de curación)
 │   ├── features.py                 ✔ (entry point de feature engineering)
 │   ├── train.py                    ✔ (entry point de modelado + tracking MLflow)
+│   ├── train_lineales.py           ✔ roadmap fase 4 (entry point de modelos lineales: Lasso/Ridge)
 │   ├── exportar_modelo.py          ✔ fase 10 (entry point de exportación del bundle de serving)
 │   ├── evaluar_nuevas.py           ✔ roadmap fase 2 (entry point de predicción sobre nuevas publicaciones)
 │   └── clasificar_ofertas.py       ✔ roadmap fase 3 (entry point de clasificación buena/mala compra)
 │   (se planifican evaluate/explain)
 │
 ├── tests/
-│   ├── unit/                       ✔ (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion, serving)
+│   ├── unit/                       ✔ (cleaning, scraper, transformations, features, models, modelos_lineales, tracking, explainability, evaluacion, serving)
 │   └── integration/                ✔ (pipeline de curación, API FastAPI)
 │
 ├── models/
@@ -496,7 +498,7 @@ real-estate-price-prediction/
 |---|---|
 | **Propósito** | Interfaz estándar para ejecutar tareas del proyecto |
 | **Responsabilidades** | Envolver comandos de instalación, calidad, testing y limpieza |
-| **Targets actuales** | `install`, `install-dev`, `scrape`, `curate`, `features`, `train`, `export-model`, `serve`, `docker-build`, `docker-up`, `docker-down`, `docker-logs`, `dvc-repro`, `dvc-push`, `dvc-pull`, `dvc-status`, `format`, `lint`, `typecheck`, `test`, `coverage`, `check`, `clean` (además de `help`) |
+| **Targets actuales** | `install`, `install-dev`, `scrape`, `curate`, `features`, `train`, `train-lineales`, `export-model`, `serve`, `docker-build`, `docker-up`, `docker-down`, `docker-logs`, `dvc-repro`, `dvc-push`, `dvc-pull`, `dvc-status`, `format`, `lint`, `typecheck`, `test`, `coverage`, `check`, `clean` (además de `help`) |
 | **Targets futuros** | `evaluate`, `explain` — solo cuando los componentes existan realmente |
 | **Dependencias** | `pyproject.toml` (comandos pip/pytest/ruff/mypy) |
 | **Usado por** | Desarrolladores, CI (futuro) |
@@ -672,6 +674,7 @@ Artifactos: `data/processed/propiedades_argenprop_features.csv` (1.999 filas × 
 | Archivo | Contenido |
 |---|---|
 | `entrenamiento.py` | `Preprocesamiento` (ordenes ordinales + imputador, ajustados solo sobre train), `ResultadoEntrenamiento` (métricas y modelos), `ajustar_preprocesamiento` / `aplicar_preprocesamiento` (sin fuga), `separar_features_target`, `calcular_metricas` (RMSE log, RMSE USD, R²), `mostrar_metricas`, `entrenar_baseline` (mediana), `entrenar_xgboost`, `entrenar_y_evaluar` (pipeline completo) |
+| `modelos_lineales.py` | `ALPHA_DEFAULT` (1.0), `MAX_ITER_DEFAULT` (10.000), `ResultadoLineales` (métricas de lasso/ridge en val, mejor en test, pipelines ajustados y `ajustes`), `crear_pipeline_lineal` (`StandardScaler` + regresor lineal), `entrenar_lasso`, `entrenar_ridge`, `entrenar_y_evaluar_lineales` (mismo preprocesamiento y features que XGBoost; entrena ambos, compara en val y evalúa al mejor en test) |
 
 Decisiones de diseño:
 - **Sin fuga de información:** no se reutiliza `construir_features` (codifica e imputa sobre todo el dataset). Se ajustan sobre train los ordenes ordinales (`crear_orden_mediana`) y la imputación por mediana (`crear_imputador`), y se reaplican a val/test con `aplicar_preprocesamiento`. Categorías no vistas en train -> `CODIGO_DESCONOCIDO (-1)`.
@@ -679,6 +682,7 @@ Decisiones de diseño:
 - **Baseline (mediana)** como referencia mínima con `DummyRegressor(strategy="median")`.
 - **XGBoost** con parámetros por defecto en `PARAMS_XGBOOST_DEFAULT` (300 árboles, depth 4, lr 0.05, regularización) y `random_state` para reproducibilidad.
 - **Métricas sobre el target logarítmico:** RMSE log (≈ error relativo), RMSE USD (deshaciendo el log) y R².
+- **Escalado dentro del pipeline (roadmap fase 4):** los lineales son sensibles a la escala; `StandardScaler` se ajusta junto con el modelo sobre train (sin fuga hacia val/test). Mismas features y mismo split que XGBoost → comparación justa.
 
 Resultados sobre el dataset real (fase 5):
 
@@ -690,11 +694,24 @@ Resultados sobre el dataset real (fase 5):
 XGBoost reduce el RMSE log en ~58 % respecto del baseline; error relativo
 mediano en test: 2,5 %.
 
+Modelos lineales sobre el dataset real (roadmap fase 4,
+`scripts/train_lineales.py`, una corrida MLflow por modelo):
+
+| Modelo | RMSE log (val) | RMSE USD (val) | R² (val) | RMSE log (test) | R² (test) |
+|---|---|---|---|---|---|
+| Lasso (alpha=1.0) | 0.6421 | $183.046 | -0.0019 | — | — |
+| Ridge (alpha=1.0) | 0.3370 | $133.440 | 0.7240 | 0.3372 | 0.7330 |
+
+Ridge es el mejor lineal (gana en val y se evalúa en test), pero **XGBoost
+sigue siendo el campeón** (test: RMSE log 0.3040 vs 0.3372). Lasso con
+alpha=1.0 anula todos los coeficientes y degenera al baseline (R² ≈ 0); la
+regularización se puede bajar con `--alpha-lasso` (el pipeline lo soporta).
+
 #### 9.4d `tracking/` (implementado en la fase 6)
 
 | Archivo | Contenido |
 |---|---|
-| `experimentos.py` | `configurar_tracking` (URI + experimento, creándolo si no existe), `registrar_resultado` (abre la corrida: loguea params, métricas, artefacto JSON `resumen_entrenamiento.json`, modelo XGBoost con firma vía `infer_signature` y lo versiona en el Model Registry; devuelve `(run_id, version)`), `finalizar_corrida` |
+| `experimentos.py` | `configurar_tracking` (URI + experimento, creándolo si no existe), `registrar_resultado` (abre la corrida: loguea params, métricas, artefacto JSON `resumen_entrenamiento.json`, modelo XGBoost con firma vía `infer_signature` y lo versiona en el Model Registry; devuelve `(run_id, version)`), `registrar_lineales` (una corrida por modelo lineal: params, métricas `val_*` y `test_*` solo para el mejor, artefacto JSON `resumen_lineal.json` y pipeline con firma; devuelve `[(nombre, run_id)]`), `finalizar_corrida` |
 
 Decisiones de diseño:
 - **`models/entrenamiento.py` se mantiene puro:** el tracking se inyecta desde
@@ -712,11 +729,15 @@ Decisiones de diseño:
 - **Métricas prefijadas** (`baseline_val_*`, `xgboost_val_*`, `xgboost_test_*`)
   para evitar colisiones de nombre; params de XGBoost logueados completos vía
   `get_params()`.
+- **Modelos lineales, sin versionar (roadmap fase 4):** `registrar_lineales` no
+  toca el Model Registry — el champion se elige y registra recién en la fase 6.
+  Cada corrida guarda su propio resumen (`resumen_lineal.json`).
 
 Resultado sobre el dataset real (fase 6): experimento
 `prediccion_precios_propiedades`, corrida con las métricas de la sección 9.4c
 y modelo `modelo_precio_propiedades` en el Model Registry (versión 1, con
-firma de entrada/salida para servir el modelo).
+firma de entrada/salida para servir el modelo). La fase 4 agrega una corrida
+por modelo lineal (lasso y ridge) con sus métricas y resumen propio.
 
 #### 9.4e `explainability/` (implementado en la fase 7)
 
@@ -786,6 +807,7 @@ subestima las altas (-15.8 % por encima de $235.000). Figuras
 | `curate.py` | ✔ implementado | Orquestar la curación (usa `src/real_estate/curation`) |
 | `features.py` | ✔ implementado | Orquestar el feature engineering (usa `src/real_estate/features`) |
 | `train.py` | ✔ implementado | Orquestar el entrenamiento + tracking MLflow (usa `src/real_estate/models` y `src/real_estate/tracking`; CLI `--input`, `--random-state` y `--no-tracking`) |
+| `train_lineales.py` | ✔ implementado (roadmap fase 4) | Orquestar los modelos lineales: Lasso y Ridge con escalado (mismas features y split que XGBoost) + una corrida MLflow por modelo sin Model Registry (usa `src/real_estate/models` y `src/real_estate/tracking`; CLI `--input`, `--random-state`, `--alpha-lasso`, `--alpha-ridge` y `--no-tracking`) |
 | `exportar_modelo.py` | ✔ implementado (fase 10) | Entrenar sobre el curado y exportar el bundle de serving a `models/modelo_precio_propiedades/` (usa `src/real_estate/serving`; CLI `--input`, `--output`, `--random-state`) |
 | `evaluar_nuevas.py` | ✔ implementado (roadmap fase 2) | Predecir el precio de las nuevas publicaciones con el bundle de serving: cura el CSV de nuevas en memoria (`curar_dataset`), carga el modelo (`cargar_bundle`) y guarda `data/processed/propiedades_nuevas_evaluadas.csv` con `precio_predicho_usd` y `fecha_prediccion` (usa `src/real_estate/serving`; CLI `--input`, `--output`, `--modelo`) |
 | `clasificar_ofertas.py` | ✔ implementado (roadmap fase 3) | Clasificar cada publicación evaluada como **buena/mala compra** (ratio `precio_predicho_usd / precio_usd` y zona neutra `1 ± std` del lote) y guardar el ranking de oportunidades `reports/ofertas.csv` ordenado por ratio descendente (usa `src/real_estate/serving`; CLI `--input`, `--output`; pensado para correrse después de `evaluar_nuevas.py` en el mismo cron) |
@@ -793,9 +815,9 @@ subestima las altas (-15.8 % por encima de $235.000). Figuras
 | `explain.py` | ✘ pendiente | Explicabilidad (SHAP) |
 
 **Relación con MakeFile:** `make scrape`, `make curate`, `make features`,
-`make train`, `make export-model` y `make serve` ya existen (aceptan
-`ARGS="..."`). A medida que existan los demás scripts, se agregan targets
-`make evaluate`, `make explain`.
+`make train`, `make train-lineales`, `make export-model` y `make serve` ya
+existen (aceptan `ARGS="..."`). A medida que existan los demás scripts, se
+agregan targets `make evaluate`, `make explain`.
 
 ### 9.6 `notebooks/` (01..07 ✔)
 
@@ -821,7 +843,8 @@ Nota: los notebooks se ejecutan headless con
 | `tests/unit/test_transformations.py` | `cargar_tipo_cambio_historico` (CSV válido/ruta inexistente/filas sin venta), `obtener_tipo_cambio` (mock de `requests`: dict/lista/sin venta/error de red/retroceso de día), `construir_tabla_tipo_cambio` (una consulta por fecha; histórico local sin consultar API; fallback a API; sin ruta → solo API), `normalizar_moneda` (USD/ARS/moneda desconocida/columnas faltantes), `normalizar_expensas`, `crear_indicadores_missing` — 22 tests | ✔ |
 | `tests/unit/test_features.py` | `seleccionar_columnas`, `crear_target_log` (filtro de inválidos y de artefactos < 1.000 USD), `crear_orden_mediana`, `codificar_ordinal`, imputación, `construir_features` end-to-end y `dividir_train_val_test` (tamaños, disjunción, reproducibilidad) — 22 tests | ✔ |
 | `tests/unit/test_models.py` | `ajustar_preprocesamiento` (aprende ordenes e imputador, ignora columnas ausentes), `aplicar_preprocesamiento` (codifica/imputa, categoría solo en val -> `CODIGO_DESCONOCIDO`, no modifica el original), `separar_features_target`, `calcular_metricas`, `entrenar_baseline` (mediana), `entrenar_xgboost` (shape, reproducibilidad, params) y `entrenar_y_evaluar` end-to-end (supera al baseline) — 15 tests | ✔ |
-| `tests/unit/test_tracking.py` | `configurar_tracking` (crea experimento en store local, respeta env `MLFLOW_TRACKING_URI`), `registrar_resultado` (devuelve run_id + versión y cierra la corrida; loguea params, métricas, artefacto `resumen_entrenamiento.json`; modelo con firma en el Model Registry), versionado v1/v2 y `finalizar_corrida` — 7 tests | ✔ |
+| `tests/unit/test_modelos_lineales.py` | Roadmap fase 4: `crear_pipeline_lineal` (escala antes del modelo, acepta Lasso y Ridge), `entrenar_lasso`/`entrenar_ridge` (shape consistente, predicciones finitas, respetan alpha) y `entrenar_y_evaluar_lineales` end-to-end (supera al baseline, el mejor en val se evalúa en test, ajustes reutilizables) — 9 tests | ✔ |
+| `tests/unit/test_tracking.py` | `configurar_tracking` (crea experimento en store local, respeta env `MLFLOW_TRACKING_URI`), `registrar_resultado` (devuelve run_id + versión y cierra la corrida; loguea params, métricas, artefacto `resumen_entrenamiento.json`; modelo con firma en el Model Registry), `registrar_lineales` (una corrida por modelo, loguea params/métricas/artefacto `resumen_lineal.json`, no versiona en el Model Registry), versionado v1/v2 y `finalizar_corrida` — 10 tests | ✔ |
 | `tests/unit/test_explainability.py` | `calcular_shap` (forma, base finita, nombres; propiedad aditiva base + Σ ≈ predicción), `importancia_global` (todas las features, no negativa, descendente), `grafico_resumen`/`grafico_barras` (devuelven `Figure` con ejes), `guardar_figuras` (escribe PNG no vacíos) — 5 tests | ✔ |
 | `tests/unit/test_evaluacion.py` | `metricas_detalladas` (predicción perfecta → errores 0 y R² 1; consistencia con `calcular_metricas`), `tabla_residuos` (columnas, relaciones internas, exactitud), `resumen_errores` (claves, coherencia con la tabla, sesgo cero), `metricas_por_segmento` (n por grupo, NaN aparte), `bias_por_rango_precio` (bandas balanceadas y ordenadas), gráficos (devuelven `Figure`, PNG no vacíos) — 14 tests | ✔ |
 | `tests/unit/test_serving.py` | Fase 10: round-trip `guardar_bundle`/`cargar_bundle` (archivos escritos, `preprocesamiento.json` válido), `ModeloPrediccion` (USD = `exp(log)`, equivale al pipeline de entrenamiento, invariante al reorden de columnas, categoría desconocida → `CODIGO_DESCONOCIDO`, NaN imputado con la mediana del bundle) — 9 tests | ✔ |
@@ -1004,6 +1027,7 @@ validación real es de la definición del pipeline. Se dispara en push/PR a
 - [x] Pipeline Train / Validation / Test
 - [x] Baseline
 - [x] XGBoost training pipeline
+- [x] Modelos lineales Lasso/Ridge (roadmap fase 4) con escalado y tracking por modelo
 - [x] MLflow tracking (`src/real_estate/tracking`)
 - [x] SHAP analysis (`src/real_estate/explainability`, notebook 05)
 - [x] Model evaluation (`src/real_estate/evaluacion`, notebook 06)
@@ -1072,7 +1096,10 @@ scripts/train.py ──→ src/real_estate/models/entrenamiento.py  (Baseline �
         ↓
 src/real_estate/tracking (MLflow: params / métricas / artefactos + Model Registry)
         ↓
-modelo_precio_propiedades (versión con firma)
+scripts/train_lineales.py ──→ src/real_estate/models/modelos_lineales.py  (Lasso/Ridge, fase 4)
+                              └──→ src/real_estate/tracking (una corrida por modelo, sin registry)
+        ↓
+modelo_precio_propiedades (versión con firma; champion elegido en fase 6)
         ↓
 notebooks/05_shap_analysis.ipynb ──→ src/real_estate/explainability/shap_analysis.py
                                       (TreeExplainer sobre val → valores/base → figuras)
@@ -1123,6 +1150,8 @@ curate.py ──→ src/real_estate/curation ──→ pandas / numpy / pydantic
 features.py ──→ src/real_estate/features ──→ scikit-learn / numpy / pandas
 train.py  ──→ src/real_estate/models ──→ scikit-learn / xgboost
              └──→ src/real_estate/tracking ──→ mlflow
+train_lineales.py ──→ src/real_estate/models ──→ scikit-learn
+             └──→ src/real_estate/tracking ──→ mlflow
 exportar_modelo.py ──→ src/real_estate/serving ──→ xgboost / pandas / numpy
 evaluar_nuevas.py ──→ src/real_estate/serving ──→ xgboost / pandas / numpy
                  └──→ src/real_estate/curation ──→ pandas / numpy
@@ -1144,11 +1173,12 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `Makefile` | El archivo se llama `MakeFile` | Renombrar o aceptar el nombre actual |
 | `scripts/scrape.py` | ✔ Migrado: `src/real_estate/ingestion/scraper.py` + `scripts/scrape.py`. La raíz quedó limpia. **v3:** segmentación por barrio/tipo (54 barrios), manejo del cap 202, backoff y progreso JSON reanudable | ✔ |
 | `scripts/curate.py` | ✔ Implementado: `src/real_estate/curation/` (cleaning, transformations, validation, pipeline) + `scripts/curate.py` | ✔ |
-| `scripts/` | `scrape.py`, `scrape_nuevas.py`, `curate.py`, `features.py`, `train.py`, `exportar_modelo.py`, `evaluar_nuevas.py`, `clasificar_ofertas.py` y `download_tipo_cambio.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
+| `scripts/` | `scrape.py`, `scrape_nuevas.py`, `curate.py`, `features.py`, `train.py`, `train_lineales.py`, `exportar_modelo.py`, `evaluar_nuevas.py`, `clasificar_ofertas.py` y `download_tipo_cambio.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
 | `scripts/scrape_nuevas.py` | ✔ Implementado (fase 12 / roadmap): dataset separado de nuevas publicaciones con `revision_periodica` (re-escaneea segmentos completos, dedup interno al dataset de nuevas) | ✔ |
 | `scripts/evaluar_nuevas.py` | ✔ Implementado (roadmap fase 2): predicción de precio sobre las nuevas publicaciones (`src/real_estate/serving/evaluar.py`): cura en memoria + carga del bundle + `precio_predicho_usd` y `fecha_prediccion` en `data/processed/propiedades_nuevas_evaluadas.csv` | ✔ |
 | `scripts/clasificar_ofertas.py` | ✔ Implementado (roadmap fase 3): clasificación buena/mala compra (`src/real_estate/serving/clasificacion.py`): ratio `precio_predicho_usd / precio_usd` con zona neutra `1 ± std` del lote + ranking por ratio descendente en `reports/ofertas.csv` | ✔ |
-| `docs/roadmap.md` | ✔ Creado: roadmap de predicción de precio + detección de oportunidades (buena/mala compra con score relativo), fases 1-6 con decisiones tomadas. Fases 1 (scrape de nuevas) ✔, 2 (predicción) ✔ y 3 (clasificación buena/mala compra) ✔ | ✔ |
+| `scripts/train_lineales.py` | ✔ Implementado (roadmap fase 4): modelos lineales Lasso/Ridge con `StandardScaler` (`src/real_estate/models/modelos_lineales.py`): mismo preprocesamiento y features que XGBoost, comparación en val y test al mejor; una corrida MLflow por modelo sin Model Registry (`registrar_lineales`) | ✔ |
+| `docs/roadmap.md` | ✔ Creado: roadmap de predicción de precio + detección de oportunidades (buena/mala compra con score relativo), fases 1-6 con decisiones tomadas. Fases 1 (scrape de nuevas) ✔, 2 (predicción) ✔, 3 (clasificación buena/mala compra) ✔ y 4 (modelos lineales Lasso/Ridge) ✔ | ✔ |
 | `configs/config.yaml` | Carpeta creada, sin archivo | Pendiente |
 | `dvc.yaml` / `dvc.lock` | ✔ Implementado: etapas `curar` y `features` con hashes md5. Remote por defecto `local` → `dvcstore/` | ✔ |
 | `Dockerfile` / `docker-compose.yml` | ✔ Implementado (fase 11): `Dockerfile` multi-stage + `requirements-api.txt` + `docker-compose.yml` con bundle montado como volumen de solo lectura | ✔ |
@@ -1157,8 +1187,8 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) y `propiedades_argenprop_features.csv` (16 columnas) | ✔ |
 | `data/external/` | Contiene `tipo_cambio_blue.csv` (5.702 fechas de dólar blue, trackeado con DVC; fuente primaria de `normalizar_moneda`, fallback a la API) | ✔ |
-| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion, serving, clasificacion) + integration (pipeline, evaluar_nuevas, API FastAPI) — 202 tests | ✔ |
-| `src/real_estate/models` | ✔ Implementado en la fase 5: `entrenamiento.py` (baseline, XGBoost, evaluación sin fuga) | ✔ |
+| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, modelos_lineales, tracking, explainability, evaluacion, serving, clasificacion) + integration (pipeline, evaluar_nuevas, API FastAPI) — 214 tests | ✔ |
+| `src/real_estate/models` | ✔ Implementado en la fase 5: `entrenamiento.py` (baseline, XGBoost, evaluación sin fuga); roadmap fase 4: `modelos_lineales.py` (Lasso/Ridge con escalado dentro del pipeline) | ✔ |
 | `src/real_estate/explainability` | ✔ Implementado en la fase 7: `shap_analysis.py` (valores SHAP, base, importancia global, figuras) | ✔ |
 | `src/real_estate/evaluacion` | ✔ Implementado en la fase 8: `analisis.py` (métricas detalladas, residuos, error por segmento, sesgo por rango, figuras) | ✔ |
 | `src/real_estate/serving` | ✔ Implementado en la fase 10: `modelo.py` (`ModeloPrediccion`) + `persistencia.py` (`guardar_bundle`/`cargar_bundle`); roadmap fase 3: `clasificacion.py` (ratio + zona `1 ± std` + ranking) | ✔ |

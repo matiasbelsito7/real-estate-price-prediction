@@ -136,6 +136,20 @@ relativo.
   justa). Requiere que las features numéricas estén imputadas y escaladas
   (los lineales son sensibles a la escala; los árboles no).
 - Un run de MLflow por modelo con métricas idénticas (RMSE log, RMSE USD, R²).
+- **Implementado ✔:** core en `src/real_estate/models/modelos_lineales.py`
+  (`crear_pipeline_lineal` con `StandardScaler`, `entrenar_lasso`,
+  `entrenar_ridge`, `entrenar_y_evaluar_lineales` con el mismo preprocesamiento
+  que XGBoost), entry point `scripts/train_lineales.py` (CLI `--input`,
+  `--random-state`, `--alpha-lasso`, `--alpha-ridge`, `--no-tracking`),
+  tracking por modelo en `registrar_lineales` (una corrida por modelo, sin
+  Model Registry — el champion se elige en la fase 6), tests de unidad
+  `tests/unit/test_modelos_lineales.py` (9 tests) + `TestRegistrarLineales` en
+  `tests/unit/test_tracking.py` (3 tests), target `make train-lineales` y
+  entrada en `docs/architecture.md`.
+- **Resultado sobre el dataset real:** Ridge (alpha=1.0) es el mejor lineal
+  (test: RMSE log 0.3372, R² 0.7330) pero **XGBoost sigue siendo el campeón**
+  (test: RMSE log 0.3040). Lasso con alpha=1.0 degenera al baseline (R² ≈ 0);
+  la regularización se ajusta con `--alpha-lasso`.
 
 ---
 
@@ -171,7 +185,9 @@ relativo.
    COMPLETADAS** (fase 2: `evaluar_nuevas.py` + tests + docs; fase 3:
    `clasificar_ofertas.py` + `clasificacion.py` + 13 tests + notebook 07 + docs).
 3. **Fases 4 + 5** (modelos lineales + tuning) → en paralelo, ambos dependen
-   solo del pipeline existente.
+   solo del pipeline existente. **Fase 4 ✔ COMPLETADA** (modelos_lineales.py +
+   train_lineales.py + registrar_lineales + 12 tests + make train-lineales +
+   docs). **Fase 5 pendiente** (tuning de XGBoost).
 4. **Fase 6** (MLflow) → transversal, se va haciendo en cada fase.
 
 ## 11. Pendientes abiertos

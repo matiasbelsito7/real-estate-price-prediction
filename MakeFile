@@ -1,4 +1,4 @@
-.PHONY: help install install-dev scrape curate features train export-model serve docker-build docker-up docker-down docker-logs dvc-repro dvc-push dvc-pull dvc-status format lint typecheck test coverage check clean
+.PHONY: help install install-dev scrape curate features train train-lineales export-model serve docker-build docker-up docker-down docker-logs dvc-repro dvc-push dvc-pull dvc-status format lint typecheck test coverage check clean
 
 
 # ============================================================
@@ -25,6 +25,7 @@ help:
 	@echo "  make curate        Run Data Curation (scripts/curate.py)"
 	@echo "  make features      Run Feature Engineering (scripts/features.py)"
 	@echo "  make train         Run Model Training (scripts/train.py)"
+	@echo "  make train-lineales  Run Linear Models Training (scripts/train_lineales.py)"
 	@echo "  make export-model  Export serving bundle (scripts/exportar_modelo.py)"
 	@echo "  make serve         Run FastAPI prediction service (Fase 10)"
 	@echo ""
@@ -80,6 +81,10 @@ features:
 
 train:
 	$(PYTHON) scripts/train.py $(ARGS)
+
+
+train-lineales:
+	$(PYTHON) scripts/train_lineales.py $(ARGS)
 
 
 export-model:

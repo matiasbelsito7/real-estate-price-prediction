@@ -16,6 +16,7 @@ from mlflow.tracking import MlflowClient
 from real_estate.features import pipeline as pl
 from real_estate.features import transformations as tr
 from real_estate.models import entrenamiento as en
+from real_estate.models import modelos_lineales as ml
 from real_estate.tracking import experimentos as ex
 
 
@@ -202,6 +203,70 @@ class TestRegistrarResultado:
 
         assert "signature:" in contenido
         assert "inputs:" in contenido
+
+
+class TestRegistrarLineales:
+    def test_devuelve_una_corrida_por_modelo(self, tmp_path: Path) -> None:
+        train, val, test = _splits()
+        resultado = ml.entrenar_y_evaluar_lineales(train, val, test, random_state=42)
+        ex.configurar_tracking(tracking_uri=tmp_path.as_uri())
+
+        runs = ex.registrar_lineales(resultado, train, random_state=42)
+
+        assert [nombre for nombre, _ in runs] == ["lasso", "ridge"]
+        assert mlflow.active_run() is None
+
+    def test_loguea_params_metricas_y_artefacto(self, tmp_path: Path) -> None:
+        train, val, test = _splits()
+        resultado = ml.entrenar_y_evaluar_lineales(train, val, test, random_state=42)
+        ex.configurar_tracking(tracking_uri=tmp_path.as_uri())
+
+        runs = ex.registrar_lineales(
+            resultado,
+            train,
+            random_state=42,
+            split_sizes={"train": len(train), "val": len(val), "test": len(test)},
+        )
+
+        for nombre, run_id in runs:
+            corrida = MlflowClient().get_run(run_id)
+
+            params = corrida.data.params
+            assert params["tipo_modelo"] == nombre
+            assert params["alpha"] == "1.0"
+            assert params["random_state"] == "42"
+            assert params["n_train"] == str(len(train))
+            assert params["n_val"] == str(len(val))
+            assert params["n_test"] == str(len(test))
+            assert params["n_features"]
+
+            metricas = corrida.data.metrics
+            assert "val_rmse_log" in metricas
+            assert "val_rmse_usd" in metricas
+            assert "val_r2" in metricas
+            if nombre == resultado.mejor:
+                assert "test_rmse_log" in metricas
+                assert "test_rmse_usd" in metricas
+                assert "test_r2" in metricas
+
+            rutas = [artefacto.path for artefacto in MlflowClient().list_artifacts(run_id)]
+            assert "resumen_lineal.json" in rutas
+
+            ruta_json = Path(MlflowClient().download_artifacts(run_id, "resumen_lineal.json"))
+            resumen = json.loads(ruta_json.read_text(encoding="utf-8"))
+            assert resumen["tipo_modelo"] == nombre
+            assert resumen["mejor_modelo"] == resultado.mejor
+            assert resumen["metricas_val"]["rmse_log"] == metricas["val_rmse_log"]
+
+    def test_no_versiona_en_el_model_registry(self, tmp_path: Path) -> None:
+        train, val, test = _splits()
+        resultado = ml.entrenar_y_evaluar_lineales(train, val, test, random_state=42)
+        ex.configurar_tracking(tracking_uri=tmp_path.as_uri())
+
+        ex.registrar_lineales(resultado, train, random_state=42)
+
+        versiones = MlflowClient().search_model_versions(f"name = '{ex.MODELO_DEFAULT}'")
+        assert versiones == []
 
 
 class TestVersionadoModelo:

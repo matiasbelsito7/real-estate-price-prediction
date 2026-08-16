@@ -3,14 +3,18 @@ Tracking de experimentos con MLflow (Fase 6).
 
 Registra parámetros, métricas, un artefacto JSON de resumen y el modelo
 XGBoost (con firma) en un experimento de MLflow, y versiona el modelo en el
-Model Registry.
+Model Registry. Para los modelos lineales (fase 4) registra una corrida por
+modelo (Lasso y Ridge) sin versionar nada en el Model Registry.
 
 API pública:
 
 1. `configurar_tracking` — define el tracking URI y el experimento.
 2. `registrar_resultado` — abre una corrida, registra params/métricas/
    artefactos, loguea el modelo y lo versiona. Devuelve `(run_id, version)`.
-3. `finalizar_corrida` — cierra la corrida activa si la hubiera.
+3. `registrar_lineales` — una corrida por modelo lineal con params, métricas
+   (val y, para el mejor, test) y pipeline con firma. Devuelve
+   `[(nombre_modelo, run_id), ...]`.
+4. `finalizar_corrida` — cierra la corrida activa si la hubiera.
 
 El módulo de modelos (`real_estate.models.entrenamiento`) se mantiene puro:
 el tracking se inyecta desde acá sin acoplarlo al entrenamiento.
@@ -28,6 +32,7 @@ from real_estate.models.entrenamiento import (
     aplicar_preprocesamiento,
     separar_features_target,
 )
+from real_estate.models.modelos_lineales import ResultadoLineales
 
 #: Nombre del experimento por defecto (agrupa todas las corridas del proyecto).
 EXPERIMENTO_DEFAULT = "prediccion_precios_propiedades"
@@ -149,6 +154,86 @@ def registrar_resultado(
         version = mlflow.register_model(model_uri, MODELO_DEFAULT)
 
         return run_id, str(version.version)
+
+
+def registrar_lineales(
+    resultado: ResultadoLineales,
+    train: pd.DataFrame,
+    random_state: int = 42,
+    dataset_info: str | None = None,
+    split_sizes: dict[str, int] | None = None,
+) -> list[tuple[str, str]]:
+    """
+    Registra en MLflow una corrida por modelo lineal y devuelve `[(nombre, run_id)]`.
+
+    Cada corrida loguea sus parámetros (tipo, alpha, semilla, tamaño del
+    split), sus métricas sobre val (`val_*`) y, para el mejor modelo, las de
+    test (`test_*`), además de un JSON de resumen y el pipeline logueado con
+    su firma (`infer_signature`).
+
+    Los modelos lineales no se versionan en el Model Registry: el champion
+    se elige y registra recién en la fase 6.
+    """
+
+    train_proc = aplicar_preprocesamiento(train, resultado.ajustes)
+    x_train, y_train = separar_features_target(train_proc)
+    firma = mlflow.models.infer_signature(x_train, y_train)
+
+    runs: list[tuple[str, str]] = []
+
+    for nombre, modelo, metricas_val in (
+        ("lasso", resultado.modelo_lasso, resultado.metricas_lasso_val),
+        ("ridge", resultado.modelo_ridge, resultado.metricas_ridge_val),
+    ):
+        with mlflow.start_run() as corrida:
+            run_id = str(corrida.info.run_id)
+
+            alpha = float(modelo.named_steps["modelo"].alpha)
+
+            # ---- Params ---------------------------------------------------
+            parametros: dict[str, object] = {
+                "tipo_modelo": nombre,
+                "alpha": str(alpha),
+                "random_state": str(random_state),
+                "n_features": str(x_train.shape[1]),
+                "n_train": str(x_train.shape[0]),
+            }
+            if dataset_info is not None:
+                parametros["dataset_info"] = dataset_info
+            if split_sizes is not None:
+                for nombre_split, tamano in split_sizes.items():
+                    parametros[f"n_{nombre_split}"] = str(tamano)
+            mlflow.log_params(parametros)
+
+            # ---- Métricas -------------------------------------------------
+            mlflow.log_metrics(_metricas_prefijadas("val", metricas_val))
+
+            es_mejor = nombre == resultado.mejor
+            if es_mejor:
+                mlflow.log_metrics(_metricas_prefijadas("test", resultado.metricas_mejor_test))
+
+            # ---- Artefacto de resumen -------------------------------------
+            resumen = {
+                "tipo_modelo": nombre,
+                "alpha": alpha,
+                "random_state": random_state,
+                "dataset_info": dataset_info,
+                "metricas_val": metricas_val,
+                "metricas_test": resultado.metricas_mejor_test if es_mejor else None,
+                "mejor_modelo": resultado.mejor,
+            }
+            mlflow.log_dict(resumen, "resumen_lineal.json")
+
+            # ---- Modelo con firma (sin Model Registry) ---------------------
+            mlflow.sklearn.log_model(
+                sk_model=modelo,
+                artifact_path="modelo",
+                signature=firma,
+            )
+
+            runs.append((nombre, run_id))
+
+    return runs
 
 
 def finalizar_corrida() -> None:
