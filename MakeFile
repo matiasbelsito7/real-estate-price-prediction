@@ -1,4 +1,4 @@
-.PHONY: help install install-dev scrape curate features train export-model serve dvc-repro dvc-push dvc-pull dvc-status format lint typecheck test coverage check clean
+.PHONY: help install install-dev scrape curate features train export-model serve docker-build docker-up docker-down docker-logs dvc-repro dvc-push dvc-pull dvc-status format lint typecheck test coverage check clean
 
 
 # ============================================================
@@ -27,6 +27,11 @@ help:
 	@echo "  make train         Run Model Training (scripts/train.py)"
 	@echo "  make export-model  Export serving bundle (scripts/exportar_modelo.py)"
 	@echo "  make serve         Run FastAPI prediction service (Fase 10)"
+	@echo ""
+	@echo "  make docker-build  Build Docker image (Fase 11)"
+	@echo "  make docker-up     Start the API container (docker compose up -d)"
+	@echo "  make docker-down   Stop the API container (docker compose down)"
+	@echo "  make docker-logs   Follow the API container logs"
 	@echo ""
 	@echo "  make dvc-repro     Run DVC data pipeline (dvc repro)"
 	@echo "  make dvc-push      Upload data to DVC remote (dvc push)"
@@ -83,6 +88,26 @@ export-model:
 
 serve:
 	uvicorn real_estate.api.app:app --reload
+
+
+# ============================================================
+# Docker (Fase 11)
+# ============================================================
+
+docker-build:
+	docker compose build
+
+
+docker-up:
+	docker compose up -d --build
+
+
+docker-down:
+	docker compose down
+
+
+docker-logs:
+	docker compose logs -f
 
 
 # ============================================================

@@ -65,7 +65,7 @@ Se debe demostrar:
 - **Experiment tracking** (MLflow)
 - **Model evaluation** (métricas rigurosas)
 - **Explainability** (SHAP)
-- **Containerization** (Docker / Docker Compose)
+- **Containerization** (Docker / Docker Compose) ✔
 - **Separación de responsabilidades** (paquetes por capa en `src/`)
 - **Arquitectura clara y documentación técnica** (este documento como mapa vivo)
 
@@ -333,7 +333,7 @@ Validar que los datos tengan sentido y detectar anomalías:
 | Code quality | Ruff, Mypy | Lint + type check | ✔ dependencia dev |
 | Git hooks | pre-commit | Gates antes del commit | ✔ dependencia dev |
 | CI/CD | GitHub Actions | Integración continua | ✔ `.github/workflows/ci.yml` |
-| Containerization | Docker, Docker Compose | Contenedores | ✘ pendiente |
+| Containerization | Docker, Docker Compose | Contenedores | ✔ fase 11 (`Dockerfile` multi-stage + `docker-compose.yml`) |
 | API / Serving | FastAPI, Uvicorn | API de predicción (fase 10) | ✔ dependencia |
 | Configuración | Pydantic Settings, python-dotenv | Configuración y env vars | ✔ dependencia |
 | Jupyter | Jupyter, IPython kernel | Notebooks de análisis | ✔ dependencia dev |
@@ -364,8 +364,9 @@ real-estate-price-prediction/
 ├── .env.example                   ✔
 ├── .env                           ✔ (local, NO versionar — ignorado por .gitignore)
 │
-├── Dockerfile                     ✘
-├── docker-compose.yml             ✘
+├── Dockerfile                     ✔
+├── docker-compose.yml             ✔
+├── requirements-api.txt           ✔
 │
 ├── configs/
 │   └── config.yaml                🏗 carpeta creada, archivo pendiente
@@ -478,8 +479,8 @@ real-estate-price-prediction/
 |---|---|
 | **Propósito** | Interfaz estándar para ejecutar tareas del proyecto |
 | **Responsabilidades** | Envolver comandos de instalación, calidad, testing y limpieza |
-| **Targets actuales** | `install`, `install-dev`, `scrape`, `curate`, `features`, `train`, `export-model`, `serve`, `dvc-repro`, `dvc-push`, `dvc-pull`, `dvc-status`, `format`, `lint`, `typecheck`, `test`, `coverage`, `check`, `clean` (además de `help`) |
-| **Targets futuros** | `evaluate`, `explain`, `docker-...` — solo cuando los componentes existan realmente |
+| **Targets actuales** | `install`, `install-dev`, `scrape`, `curate`, `features`, `train`, `export-model`, `serve`, `docker-build`, `docker-up`, `docker-down`, `docker-logs`, `dvc-repro`, `dvc-push`, `dvc-pull`, `dvc-status`, `format`, `lint`, `typecheck`, `test`, `coverage`, `check`, `clean` (además de `help`) |
+| **Targets futuros** | `evaluate`, `explain` — solo cuando los componentes existan realmente |
 | **Dependencias** | `pyproject.toml` (comandos pip/pytest/ruff/mypy) |
 | **Usado por** | Desarrolladores, CI (futuro) |
 | **Nota** | El esquema conceptual lo llama `Makefile`; el archivo real en disco es `MakeFile`. |
@@ -880,10 +881,27 @@ make serve           # uvicorn real_estate.api.app:app --reload
 Resultado sobre el dataset real (fase 10): split 1.599 train / 200 val / 200
 test, RMSE log 0.304, R² 0.783 en test; `/predict` devuelve precios en USD.
 
-### 9.11 Docker (pendiente)
+### 9.11 Docker (implementado, fase 11)
 
-`Dockerfile` + `docker-compose.yml` para contenerizar el proyecto / el servicio
-de predicción (deployment). Fuera de alcance por ahora (fase 11 cerrada).
+Conteneriza el servicio de predicción FastAPI:
+
+- **`Dockerfile`** multi-etapa:
+  1. `build` (`python:3.12-slim`): crea un venv en `/opt/venv` con las
+     dependencias de serving (`requirements-api.txt`) e instala el paquete
+     `real_estate` con `--no-deps` (las deps reales vienen del requirements).
+  2. `runtime` (`python:3.12-slim`): copia solo el venv, expone el puerto 8000,
+     define `MODELO_DIR` y un `HEALTHCHECK` sobre `/health` (urllib, no hay
+     curl en la imagen slim). Arranca con `uvicorn real_estate.api.app:app`.
+- **`requirements-api.txt`**: solo el runtime de serving (fastapi, uvicorn,
+  pydantic-settings, python-dotenv, xgboost, numpy, pandas, scikit-learn) — sin
+  mlflow/shap/scraping para mantener la imagen liviana.
+- **`docker-compose.yml`**: monta el bundle de serving
+  (`models/modelo_precio_propiedades/`) como volumen de solo lectura — es un
+  artefacto entrenado gitignoreado, no parte de la imagen.
+
+**Uso:** `make export-model` (una vez, o tras reentrenar) → `make docker-build`
+→ `make docker-up` → `make docker-logs`. La API queda en `http://localhost:8000`
+(`/health` + `/predict`).
 
 ### 9.12 CI/CD
 
@@ -954,8 +972,8 @@ validación real es de la definición del pipeline. Se dispara en push/PR a
 - [x] GitHub Actions (`ci.yml` + `dvc.yml`)
 - [x] Serving bundle (`src/real_estate/serving` + `scripts/exportar_modelo.py`, bundle en `models/modelo_precio_propiedades/`)
 - [x] API de predicción FastAPI (`src/real_estate/api`, `/health` + `/predict`, `make serve`)
-- [ ] Dockerfile (fase 11, fuera de alcance)
-- [ ] docker-compose (fase 11, fuera de alcance)
+- [x] Dockerfile multi-stage + `requirements-api.txt` (fase 11)
+- [x] docker-compose (fase 11)
 
 ---
 
@@ -1073,7 +1091,7 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `scripts/` con 5 scripts | `scrape.py`, `curate.py`, `features.py` y `train.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
 | `configs/config.yaml` | Carpeta creada, sin archivo | Pendiente |
 | `dvc.yaml` / `dvc.lock` | ✔ Implementado: etapas `curar` y `features` con hashes md5. Remote por defecto `local` → `dvcstore/` | ✔ |
-| `Dockerfile` / `docker-compose.yml` | No existen | Pendiente |
+| `Dockerfile` / `docker-compose.yml` | ✔ Implementado (fase 11): `Dockerfile` multi-stage + `requirements-api.txt` + `docker-compose.yml` con bundle montado como volumen de solo lectura | ✔ |
 | `.github/workflows/ci.yml` | ✔ Implementado: lint (Ruff), type check (Mypy) y tests (Pytest + cobertura) en Python 3.11/3.12 | ✔ |
 | `.github/workflows/dvc.yml` | ✔ Implementado: valida etapas (`stage list`), estado (`status`) y `pull` best-effort | ✔ |
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |

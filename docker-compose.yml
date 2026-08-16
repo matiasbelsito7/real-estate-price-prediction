@@ -1,0 +1,24 @@
+# ============================================================
+# Fase 11 — Docker
+# Orquestación del servicio de predicción.
+#
+# El bundle de serving (models/modelo_precio_propiedades/) se monta
+# como volumen de solo lectura: es un artefacto entrenado gitignoreado,
+# no parte de la imagen. Antes de `docker compose up` hay que ejecutar
+# `make export-model`.
+# ============================================================
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: real-estate-api:latest
+    container_name: real-estate-api
+    ports:
+      - "8000:8000"
+    environment:
+      - MODELO_DIR=/app/models/modelo_precio_propiedades
+    volumes:
+      - ./models/modelo_precio_propiedades:/app/models/modelo_precio_propiedades:ro
+    restart: unless-stopped

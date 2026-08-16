@@ -1,0 +1,17 @@
+# ============================================================
+# Fase 11 — Docker
+# Dependencias de runtime para el servicio de predicción.
+#
+# Solo las que el path de serving necesita (API + modelo), sin
+# mlflow/shap/scraping/EDA para mantener la imagen liviana.
+# Rangos alineados con pyproject.toml.
+# ============================================================
+
+fastapi>=0.115,<1.0
+uvicorn>=0.30,<1.0
+pydantic-settings>=2.0,<3.0
+python-dotenv>=1.0,<2.0
+xgboost>=2.1,<4.0
+numpy>=2.0,<3.0
+pandas>=2.2,<3.0
+scikit-learn>=1.5,<2.0
