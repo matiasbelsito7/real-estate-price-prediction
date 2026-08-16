@@ -142,6 +142,11 @@ python_version = "3.12"
 
 files = ["src", "tests"]
 
+# Equipara el chequeo local con el de CI: en CI el paquete se instala con
+# `pip install -e .` y mypy lo encuentra; sin él, los imports de
+# `real_estate` se resuelven como "módulo faltante" y todo se tipa como Any.
+mypy_path = ["src"]
+
 strict = true
 
 warn_unused_configs = true
