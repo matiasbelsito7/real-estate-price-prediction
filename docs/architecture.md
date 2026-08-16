@@ -60,7 +60,7 @@ Se debe demostrar:
 - **Testing** (pytest, unit + integration)
 - **Linting** (Ruff)
 - **Type checking** (Mypy en modo `strict`)
-- **CI** (GitHub Actions)
+- **CI** (GitHub Actions) ✔
 - **Experiment tracking** (MLflow)
 - **Model evaluation** (métricas rigurosas)
 - **Explainability** (SHAP)
@@ -320,7 +320,7 @@ Validar que los datos tengan sentido y detectar anomalías:
 | Testing | Pytest, pytest-cov | Tests | ✔ dependencia dev |
 | Code quality | Ruff, Mypy | Lint + type check | ✔ dependencia dev |
 | Git hooks | pre-commit | Gates antes del commit | ✔ dependencia dev |
-| CI/CD | GitHub Actions | Integración continua | ✘ pendiente (workflows vacíos) |
+| CI/CD | GitHub Actions | Integración continua | ✔ `.github/workflows/ci.yml` |
 | Containerization | Docker, Docker Compose | Contenedores | ✘ pendiente |
 | Configuración | Pydantic Settings, python-dotenv | Configuración y env vars | ✔ dependencia |
 | Jupyter | Jupyter, IPython kernel | Notebooks de análisis | ✔ dependencia dev |
@@ -409,7 +409,7 @@ real-estate-price-prediction/
 │
 └── .github/
     └── workflows/
-        ├── ci.yml                  ✘
+        ├── ci.yml                  ✔ (lint + type check + tests)
         └── dvc.yml                 ✘
 ```
 
@@ -636,10 +636,12 @@ Workflow de DVC en `.github/workflows/dvc.yml` (pendiente).
 `Dockerfile` + `docker-compose.yml` para contenerizar el proyecto / el servicio
 de predicción (deployment).
 
-### 9.11 CI/CD (pendiente)
+### 9.11 CI/CD
 
-`ci.yml`: ejecutar Pytest / Ruff / Mypy en GitHub Actions; `dvc.yml`: reproducir
-el pipeline de datos. Workflows creados como carpeta vacía.
+`ci.yml` (`.github/workflows/ci.yml`): ejecuta Ruff (check + formato), Mypy y
+Pytest con cobertura en GitHub Actions. Un job de calidad (Python 3.12) y un
+job de tests con matriz Python 3.11 / 3.12, instalando `pip install -e ".[dev]"`.
+`dvc.yml`: reproducir el pipeline de datos (pendiente hasta implementar DVC).
 
 ### 9.12 Datos
 
@@ -692,7 +694,7 @@ el pipeline de datos. Workflows creados como carpeta vacía.
 - [ ] MLflow tracking (`src/real_estate/tracking`)
 - [ ] Model evaluation
 - [ ] SHAP analysis (`src/real_estate/explainability`, notebook 05)
-- [ ] GitHub Actions (`ci.yml`, `dvc.yml`)
+- [x] GitHub Actions (`ci.yml`); `dvc.yml` pendiente hasta implementar DVC
 - [ ] Dockerfile
 - [ ] docker-compose
 - [ ] Deployment / API
@@ -788,7 +790,8 @@ explain.py ──→ src/real_estate/explainability ──→ shap
 | `configs/config.yaml` | Carpeta creada, sin archivo | Pendiente |
 | `dvc.yaml` / `dvc.lock` | No existen | Pendiente |
 | `Dockerfile` / `docker-compose.yml` | No existen | Pendiente |
-| `.github/workflows/{ci,dvc}.yml` | Carpeta creada, vacía | Pendiente |
+| `.github/workflows/ci.yml` | ✔ Implementado: lint (Ruff), type check (Mypy) y tests (Pytest + cobertura) en Python 3.11/3.12 | ✔ |
+| `.github/workflows/dvc.yml` | No existe | Pendiente |
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) | ✔ |
 | `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations) + integration (pipeline) — 72 tests | ✔ |
@@ -800,7 +803,7 @@ explain.py ──→ src/real_estate/explainability ──→ shap
 > numpy 2.5.2, cuyos stubs usan `type` statements (PEP 695, solo Python ≥ 3.12).
 > `pyproject.toml` fija `[tool.mypy] python_version = "3.12"` (dentro del rango
 > soportado `>=3.11,<3.14`), lo que hace que `mypy` plano, el hook de pre-commit
-> y el CI futuro funcionen de forma consistente. El hook de mypy en pre-commit
+> y el CI funcionen de forma consistente. El hook de mypy en pre-commit
 > además declara `pandas-stubs`, `types-requests` y `pytest` como dependencias
 > extra (pytest es necesario para tipar los decoradores `@pytest.fixture` y
 > `@pytest.mark.parametrize` en los tests: el entorno aislado del hook no
