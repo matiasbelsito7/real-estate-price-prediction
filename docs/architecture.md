@@ -389,7 +389,8 @@ real-estate-price-prediction/
 │   ├── interim/                             🏗 vacía
 │   ├── processed/ propiedades_argenprop_curado.csv  ✔ (32 columnas, output DVC etapa curar)
 │   │              propiedades_argenprop_features.csv ✔ (16 columnas, output DVC etapa features)
-│   └── external/                            🏗 vacía
+│   └── external/ tipo_cambio_blue.csv       ✔ (histórico dólar blue, 5.702 fechas, DVC)
+│                tipo_cambio_blue.csv.dvc    ✔ (pointer de DVC)
 │
 ├── dvc.yaml                        ✔ (etapas curar y features)
 ├── dvc.lock                        ✔ (hashes md5 de deps y outs)
@@ -575,10 +576,10 @@ real-estate-price-prediction/
 |---|---|
 | **Ruta** | `src/real_estate/curation/transformations.py` |
 | **Propósito** | Transformaciones de valor: moneda común y señales de datos informados |
-| **Responsabilidades** | `obtener_tipo_cambio` (consulta histórica por fecha, retrocede días hábiles, usa cotización "venta"), `construir_tabla_tipo_cambio` (una request por fecha única), `normalizar_moneda` (crea `tipo_cambio_ars_usd` y `precio_usd`; USD se copia, ARS se divide), `normalizar_expensas` (`expensas_usd`), `crear_indicadores_missing` (`{columna}_informado` int8) |
-| **Estado** | ✔ Implementado |
-| **Dependencias** | `pandas`, `requests` |
-| **FX API** | `https://api.argentinadatos.com/v1/cotizaciones/dolares/{market}/{date}`, `FX_MARKET = "blue"` (opciones: oficial, blue, bolsa, contadoconliqui, mayorista, etc.) |
+| **Responsabilidades** | `obtener_tipo_cambio` (consulta histórica por fecha, retrocede días hábiles, usa cotización "venta"), `cargar_tipo_cambio_historico` (lee el CSV versionado a `{fecha: venta}`; si no existe, cae a la API), `construir_tabla_tipo_cambio` (una consulta por fecha única; usa el histórico local como fuente primaria y la API como fallback), `normalizar_moneda` (crea `tipo_cambio_ars_usd` y `precio_usd`; USD se copia, ARS se divide), `normalizar_expensas` (`expensas_usd`), `crear_indicadores_missing` (`{columna}_informado` int8) |
+| **Estado** | ✔ Implementado. La conversión usa como fuente primaria el dataset versionado `data/external/tipo_cambio_blue.csv` (`RUTA_TIPO_CAMBIO_HISTORICO`); las fechas no cubiertas por el histórico caen a la API |
+| **Dependencias** | `pandas`, `requests`, `csv`, `os` |
+| **FX API** | `https://api.argentinadatos.com/v1/cotizaciones/dolares/{market}/{date}`, `FX_MARKET = "blue"` (opciones: oficial, blue, bolsa, contadoconliqui, mayorista, etc.). Fallback: solo se consulta cuando la fecha no está en el histórico local |
 | **Usado por** | `pipeline.py` |
 | **Outputs** | `precio_usd`, `expensas_usd`, `tipo_cambio_ars_usd`, `*_informado` |
 
@@ -617,6 +618,17 @@ real-estate-price-prediction/
 | **Usa** | `real_estate.curation.pipeline.curar_csv` |
 | **Usado por** | `make curate` (MakeFile) |
 | **Outputs** | CSV curado en `data/processed/` |
+
+#### `scripts/download_tipo_cambio.py`
+
+| Atributo | Valor |
+|---|---|
+| **Ruta** | `scripts/download_tipo_cambio.py` |
+| **Propósito** | Descarga el histórico completo del dólar blue desde ArgentinaDatos y lo guarda como dataset versionado |
+| **Responsabilidades** | `descargar_historico` (valida que la API devuelva una lista), `guardar_historico` (CSV `fecha,compra,venta`), `main` (imprime cantidad, rango y avisa fechas duplicadas) |
+| **CLI** | `--output` (default `data/external/tipo_cambio_blue.csv`) |
+| **Usado por** | Mantenimiento manual; el dataset resultante alimenta `normalizar_moneda` sin depender de la API |
+| **Outputs** | `data/external/tipo_cambio_blue.csv` (5.702 fechas, 2011-01-03 → 2026-08-15, trackeado con DVC) |
 
 ### 9.4 Paquete `src/real_estate/` — subpaquetes
 
@@ -798,7 +810,7 @@ Nota: los notebooks se ejecutan headless con
 |---|---|---|
 | `tests/unit/test_cleaning.py` | `limpiar_numero` (14 formatos reales de Argenprop), `limpiar_columnas_numericas`, `limpiar_expensas`, `preparar_fecha` | ✔ |
 | `tests/unit/test_scraper.py` | `parsear_listing` (tarjeta completa y mínima, swap Capital Federal, fallback de moneda por `idmoneda`), helpers de URL/tipo/ambientes, ciclo CSV (header/append/ids), `construir_url_segmento` (tipo/barrio), progreso (guardar/cargar/corrupto/reanudación), `scrapear` con 202 (cap en página 100 → completo sin reintentar; 202 temprano → reintenta y avanza; bloqueo sostenido → incompleto y reanudable; segmento completo se saltea; reanudación desde última página guardada; cap respetado aunque `reintentos-202` sea alto) — 39 tests | ✔ |
-| `tests/unit/test_transformations.py` | `obtener_tipo_cambio` (mock de `requests`: dict/lista/sin venta/error de red/retroceso de día), `construir_tabla_tipo_cambio`, `normalizar_moneda` (USD/ARS/moneda desconocida/columnas faltantes), `normalizar_expensas`, `crear_indicadores_missing` | ✔ |
+| `tests/unit/test_transformations.py` | `cargar_tipo_cambio_historico` (CSV válido/ruta inexistente/filas sin venta), `obtener_tipo_cambio` (mock de `requests`: dict/lista/sin venta/error de red/retroceso de día), `construir_tabla_tipo_cambio` (una consulta por fecha; histórico local sin consultar API; fallback a API; sin ruta → solo API), `normalizar_moneda` (USD/ARS/moneda desconocida/columnas faltantes), `normalizar_expensas`, `crear_indicadores_missing` — 22 tests | ✔ |
 | `tests/unit/test_features.py` | `seleccionar_columnas`, `crear_target_log` (filtro de inválidos y de artefactos < 1.000 USD), `crear_orden_mediana`, `codificar_ordinal`, imputación, `construir_features` end-to-end y `dividir_train_val_test` (tamaños, disjunción, reproducibilidad) — 22 tests | ✔ |
 | `tests/unit/test_models.py` | `ajustar_preprocesamiento` (aprende ordenes e imputador, ignora columnas ausentes), `aplicar_preprocesamiento` (codifica/imputa, categoría solo en val -> `CODIGO_DESCONOCIDO`, no modifica el original), `separar_features_target`, `calcular_metricas`, `entrenar_baseline` (mediana), `entrenar_xgboost` (shape, reproducibilidad, params) y `entrenar_y_evaluar` end-to-end (supera al baseline) — 15 tests | ✔ |
 | `tests/unit/test_tracking.py` | `configurar_tracking` (crea experimento en store local, respeta env `MLFLOW_TRACKING_URI`), `registrar_resultado` (devuelve run_id + versión y cierra la corrida; loguea params, métricas, artefacto `resumen_entrenamiento.json`; modelo con firma en el Model Registry), versionado v1/v2 y `finalizar_corrida` — 7 tests | ✔ |
@@ -938,7 +950,7 @@ validación real es de la definición del pipeline. Se dispara en push/PR a
 | `data/interim/` | Datos intermedios (p. ej., entre curación y features) | 🏗 vacía |
 | `data/processed/propiedades_argenprop_curado.csv` | Dataset curado, 2.005 filas, 32 columnas (listo para EDA/features) | ✔ |
 | `data/processed/propiedades_argenprop_features.csv` | Matriz de features, 1.999 filas × 16 columnas, 0 faltantes (lista para modelar) | ✔ |
-| `data/external/` | Datos externos (p. ej., tipo de cambio) | 🏗 vacía |
+| `data/external/tipo_cambio_blue.csv` | Histórico del dólar blue (compra/venta por día hábil), 5.702 fechas (2011-01-03 → 2026-08-15), trackeado por DVC. Fuente primaria de `normalizar_moneda`; se descarga con `scripts/download_tipo_cambio.py` | ✔ |
 
 ### 9.14 Otros directorios
 
@@ -1101,7 +1113,7 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `Makefile` | El archivo se llama `MakeFile` | Renombrar o aceptar el nombre actual |
 | `scripts/scrape.py` | ✔ Migrado: `src/real_estate/ingestion/scraper.py` + `scripts/scrape.py`. La raíz quedó limpia. **v3:** segmentación por barrio/tipo (54 barrios), manejo del cap 202, backoff y progreso JSON reanudable | ✔ |
 | `scripts/curate.py` | ✔ Implementado: `src/real_estate/curation/` (cleaning, transformations, validation, pipeline) + `scripts/curate.py` | ✔ |
-| `scripts/` con 5 scripts | `scrape.py`, `curate.py`, `features.py` y `train.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
+| `scripts/` | `scrape.py`, `curate.py`, `features.py`, `train.py` y `download_tipo_cambio.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
 | `configs/config.yaml` | Carpeta creada, sin archivo | Pendiente |
 | `dvc.yaml` / `dvc.lock` | ✔ Implementado: etapas `curar` y `features` con hashes md5. Remote por defecto `local` → `dvcstore/` | ✔ |
 | `Dockerfile` / `docker-compose.yml` | ✔ Implementado (fase 11): `Dockerfile` multi-stage + `requirements-api.txt` + `docker-compose.yml` con bundle montado como volumen de solo lectura | ✔ |
@@ -1109,6 +1121,7 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `.github/workflows/dvc.yml` | ✔ Implementado: valida etapas (`stage list`), estado (`status`) y `pull` best-effort | ✔ |
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) y `propiedades_argenprop_features.csv` (16 columnas) | ✔ |
+| `data/external/` | Contiene `tipo_cambio_blue.csv` (5.702 fechas de dólar blue, trackeado con DVC; fuente primaria de `normalizar_moneda`, fallback a la API) | ✔ |
 | `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion, serving) + integration (pipeline, API FastAPI) — 174 tests | ✔ |
 | `src/real_estate/models` | ✔ Implementado en la fase 5: `entrenamiento.py` (baseline, XGBoost, evaluación sin fuga) | ✔ |
 | `src/real_estate/explainability` | ✔ Implementado en la fase 7: `shap_analysis.py` (valores SHAP, base, importancia global, figuras) | ✔ |

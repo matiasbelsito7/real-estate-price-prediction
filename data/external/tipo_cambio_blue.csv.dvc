@@ -1,0 +1,5 @@
+outs:
+- md5: ab37deb701d58fdbb731aa346746a5b3
+  size: 107185
+  hash: md5
+  path: tipo_cambio_blue.csv

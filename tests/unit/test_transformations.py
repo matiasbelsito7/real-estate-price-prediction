@@ -7,6 +7,7 @@ módulo `requests` mockeado: los tests no hacen requests reales.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
@@ -28,6 +29,28 @@ class FakeResponse:
 
     def json(self) -> object:
         return self._data
+
+
+class TestCargarTipoCambioHistorico:
+    def test_carga_csv_valido(self, tmp_path: Path) -> None:
+        ruta = tmp_path / "tipo_cambio.csv"
+        ruta.write_text(
+            "fecha,compra,venta\n2026-08-13,1520,1540\n2026-08-14,1525,1545\n",
+            encoding="utf-8",
+        )
+        tabla = tr.cargar_tipo_cambio_historico(str(ruta))
+        assert tabla == {"2026-08-13": 1540.0, "2026-08-14": 1545.0}
+
+    def test_ruta_inexistente_devuelve_vacio(self) -> None:
+        assert tr.cargar_tipo_cambio_historico("no-existe.csv") == {}
+
+    def test_ignora_filas_sin_venta(self, tmp_path: Path) -> None:
+        ruta = tmp_path / "tipo_cambio.csv"
+        ruta.write_text(
+            "fecha,compra,venta\n2026-08-13,1520,\n2026-08-14,,1545\n",
+            encoding="utf-8",
+        )
+        assert tr.cargar_tipo_cambio_historico(str(ruta)) == {"2026-08-14": 1545.0}
 
 
 class TestObtenerTipoCambio:
@@ -87,6 +110,57 @@ class TestConstruirTablaTipoCambio:
         fechas = pd.Series(pd.to_datetime(["2026-07-15"]))
         assert tr.construir_tabla_tipo_cambio(fechas) == {}
 
+    def test_usa_historico_local_sin_consultar_api(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Si la fecha está en el CSV histórico, no se consulta la API.
+        ruta = tmp_path / "tipo_cambio.csv"
+        ruta.write_text("fecha,compra,venta\n2026-07-15,1200,1220\n", encoding="utf-8")
+
+        consultas: list[str] = []
+
+        def obtener_con_registro(fecha: str, market: str = "blue") -> float:
+            consultas.append(fecha)
+            return TASA
+
+        monkeypatch.setattr(tr, "obtener_tipo_cambio", obtener_con_registro)
+
+        fechas = pd.Series(pd.to_datetime(["2026-07-15"]))
+        tabla = tr.construir_tabla_tipo_cambio(fechas, ruta_historico=str(ruta))
+
+        assert tabla == {"2026-07-15": 1220.0}
+        assert consultas == []
+
+    def test_cae_a_api_cuando_la_fecha_no_esta_en_historico(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Fecha fuera del rango del histórico (o sin cotización) cae a la API.
+        ruta = tmp_path / "tipo_cambio.csv"
+        ruta.write_text("fecha,compra,venta\n2026-07-14,1200,1220\n", encoding="utf-8")
+
+        monkeypatch.setattr(tr, "obtener_tipo_cambio", lambda fecha, market="blue": TASA)
+
+        fechas = pd.Series(pd.to_datetime(["2026-07-15"]))
+        tabla = tr.construir_tabla_tipo_cambio(fechas, ruta_historico=str(ruta))
+
+        assert tabla == {"2026-07-15": TASA}
+
+    def test_sin_ruta_historico_solo_api(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Sin ruta_historico el comportamiento queda igual que antes.
+        consultas: list[str] = []
+
+        def obtener_con_registro(fecha: str, market: str = "blue") -> float:
+            consultas.append(fecha)
+            return TASA
+
+        monkeypatch.setattr(tr, "obtener_tipo_cambio", obtener_con_registro)
+
+        fechas = pd.Series(pd.to_datetime(["2026-07-15", "2026-07-16"]))
+        tabla = tr.construir_tabla_tipo_cambio(fechas)
+
+        assert tabla == {"2026-07-15": TASA, "2026-07-16": TASA}
+        assert consultas == ["2026-07-15", "2026-07-16"]
+
 
 class TestNormalizarMoneda:
     def _monedas(self) -> pd.DataFrame:
@@ -99,7 +173,9 @@ class TestNormalizarMoneda:
         )
 
     def test_convierte_ars_a_usd_y_deja_usd(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(tr, "construir_tabla_tipo_cambio", lambda fechas: {FECHA: TASA})
+        monkeypatch.setattr(
+            tr, "construir_tabla_tipo_cambio", lambda fechas, ruta_historico=None: {FECHA: TASA}
+        )
         df = self._monedas()
         resultado = tr.normalizar_moneda(df.copy())
 
@@ -116,7 +192,9 @@ class TestNormalizarMoneda:
     def test_moneda_desconocida_deja_precio_usd_vacio(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(tr, "construir_tabla_tipo_cambio", lambda fechas: {FECHA: TASA})
+        monkeypatch.setattr(
+            tr, "construir_tabla_tipo_cambio", lambda fechas, ruta_historico=None: {FECHA: TASA}
+        )
         df = pd.DataFrame(
             {
                 "precio": [100000.0],

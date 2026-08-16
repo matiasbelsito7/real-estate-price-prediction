@@ -1,13 +1,16 @@
 """
 Transformaciones del dataset (Data Curation).
 
-Normalización de moneda a USD con tipo de cambio histórico (mercado blue
-de ArgentinaDatos, consultado por fecha de scraping) y creación de
-indicadores de valores informados (missing indicators).
+Normalización de moneda a USD con tipo de cambio histórico (mercado blue),
+usando el dataset versionado `data/external/tipo_cambio_blue.csv` como
+fuente primaria y la API de ArgentinaDatos como fallback para fechas no
+cubiertas. Además crea indicadores de valores informados (missing indicators).
 """
 
 from __future__ import annotations
 
+import csv
+import os
 import time
 
 import pandas as pd
@@ -19,6 +22,12 @@ import requests
 FX_MARKET = "blue"
 
 FX_API_URL = "https://api.argentinadatos.com/v1/cotizaciones/dolares/{market}/{date}"
+
+# Dataset histórico versionado del dólar blue (descargado con
+# `scripts/download_tipo_cambio.py` y trackeado con DVC). Se usa como
+# fuente primaria del tipo de cambio para no depender de la API en cada
+# corrida de curación.
+RUTA_TIPO_CAMBIO_HISTORICO = "data/external/tipo_cambio_blue.csv"
 
 # Columnas donde queremos conservar información sobre
 # si el dato fue informado o no.
@@ -84,11 +93,43 @@ def obtener_tipo_cambio(
     return None
 
 
-def construir_tabla_tipo_cambio(fechas: pd.Series) -> dict[str, float]:
+def cargar_tipo_cambio_historico(ruta: str) -> dict[str, float]:
+    """
+    Carga el dataset histórico de tipo de cambio (CSV versionado).
+
+    Devuelve {fecha: venta} para cada fecha del CSV. Si el archivo no
+    existe, devuelve un dict vacío (la conversión cae a la API).
+    """
+
+    if not os.path.exists(ruta):
+        print(f"  (aviso: no existe '{ruta}'; se usará la API por fecha)")
+        return {}
+
+    tabla: dict[str, float] = {}
+
+    with open(ruta, encoding="utf-8") as f:
+        for fila in csv.DictReader(f):
+            fecha = fila.get("fecha")
+            venta = fila.get("venta")
+
+            if fecha and venta:
+                tabla[fecha] = float(venta)
+
+    print(f"  Tipo de cambio histórico cargado: {len(tabla):,} fechas ({ruta})")
+
+    return tabla
+
+
+def construir_tabla_tipo_cambio(
+    fechas: pd.Series,
+    ruta_historico: str | None = None,
+) -> dict[str, float]:
     """
     Obtiene el tipo de cambio una sola vez por fecha.
 
-    Esto evita realizar una request por cada propiedad.
+    Esto evita realizar una request por cada propiedad. Si se pasa
+    `ruta_historico` (CSV versionado del dólar blue), se usa como fuente
+    primaria; las fechas no cubiertas caen a la API.
     """
 
     fechas_unicas = sorted(fechas.dropna().dt.strftime("%Y-%m-%d").unique())
@@ -99,17 +140,23 @@ def construir_tabla_tipo_cambio(fechas: pd.Series) -> dict[str, float]:
 
     print(f"Fechas únicas encontradas: {len(fechas_unicas)}")
 
+    tabla_local = cargar_tipo_cambio_historico(ruta_historico) if ruta_historico else {}
+
     tipos_cambio: dict[str, float] = {}
 
     for fecha in fechas_unicas:
-        print(f"  {fecha} -> consultando {FX_MARKET}...")
+        tasa = tabla_local.get(fecha)
 
-        tasa = obtener_tipo_cambio(fecha, FX_MARKET)
+        if tasa is not None:
+            print(f"  {fecha} -> histórico: 1 USD = {tasa:,.2f} ARS")
+
+        else:
+            print(f"  {fecha} -> consultando {FX_MARKET}...")
+
+            tasa = obtener_tipo_cambio(fecha, FX_MARKET)
 
         if tasa is not None:
             tipos_cambio[fecha] = tasa
-
-            print(f"      1 USD = {tasa:,.2f} ARS")
 
         else:
             print("      ERROR: no se encontró cotización")
@@ -117,7 +164,10 @@ def construir_tabla_tipo_cambio(fechas: pd.Series) -> dict[str, float]:
     return tipos_cambio
 
 
-def normalizar_moneda(df: pd.DataFrame) -> pd.DataFrame:
+def normalizar_moneda(
+    df: pd.DataFrame,
+    ruta_tipo_cambio: str | None = RUTA_TIPO_CAMBIO_HISTORICO,
+) -> pd.DataFrame:
     """
     Crea precio_usd.
 
@@ -127,6 +177,8 @@ def normalizar_moneda(df: pd.DataFrame) -> pd.DataFrame:
     Si está en ARS:
         precio_usd = precio / tipo_cambio
 
+    El tipo de cambio sale del dataset histórico versionado
+    (`ruta_tipo_cambio`) y, para fechas no cubiertas, de la API.
     No modifica precio ni moneda originales.
     """
 
@@ -145,7 +197,7 @@ def normalizar_moneda(df: pd.DataFrame) -> pd.DataFrame:
 
     fechas = df["fecha_scrape"].dt.strftime("%Y-%m-%d")
 
-    tipos_cambio = construir_tabla_tipo_cambio(df["fecha_scrape"])
+    tipos_cambio = construir_tabla_tipo_cambio(df["fecha_scrape"], ruta_historico=ruta_tipo_cambio)
 
     df["tipo_cambio_ars_usd"] = fechas.map(tipos_cambio)
 
