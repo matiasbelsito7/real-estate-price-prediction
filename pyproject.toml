@@ -122,6 +122,10 @@ ignore = [
     "E501",   # Line length handled by Ruff formatter
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# `X` es la convención estándar de SHAP/matplotlib para la matriz de features.
+"src/real_estate/explainability/shap_analysis.py" = ["N803"]
+
 
 [tool.ruff.format]
 quote-style = "double"

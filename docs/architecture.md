@@ -369,7 +369,7 @@ real-estate-price-prediction/
 ├── dvc.yaml                        ✘
 ├── dvc.lock                        ✘
 │
-├── notebooks/                      ✔ 01_eda_estructura_y_calidad, 02_eda_precio_y_caracteristicas, 03_feature_engineering, 04_model_analysis (05 pendiente)
+├── notebooks/                      ✔ 01_eda_estructura_y_calidad, 02_eda_precio_y_caracteristicas, 03_feature_engineering, 04_model_analysis, 05_shap_analysis
 │
 ├── src/
 │   └── real_estate/
@@ -388,7 +388,8 @@ real-estate-price-prediction/
 │       │   ├── transformations.py  ✔ (selección, target log, ordinal, imputación)
 │       │   └── pipeline.py         ✔ (orquestador construir_features + splits)
 │       ├── models/                ✔ entrenamiento.py (baseline, XGBoost, sin fuga)
-│       ├── explainability/        🏗 vacío
+│       ├── explainability/        ✔ shap_analysis.py (SHAP: valores, base,
+│       │                             figuras, guardado)
 │       ├── tracking/              ✔ experimentos.py (MLflow: params, métricas,
 │       │                             artefactos, Model Registry)
 │       └── utils/                 🏗 vacío
@@ -401,13 +402,13 @@ real-estate-price-prediction/
 │   (se planifican evaluate/explain)
 │
 ├── tests/
-│   ├── unit/                       ✔ (cleaning, scraper, transformations, features, models, tracking)
+│   ├── unit/                       ✔ (cleaning, scraper, transformations, features, models, tracking, explainability)
 │   └── integration/                ✔ (pipeline de curación)
 │
 ├── models/                         🏗 vacía
 │
 ├── reports/
-│   ├── figures/                    🏗 vacía
+│   ├── figures/                    ✔ en uso (figuras SHAP, fase 7; gitignored)
 │   └── metrics/                    🏗 vacía
 │
 ├── mlruns/                         ✔ (store local de MLflow, gitignored)
@@ -421,7 +422,9 @@ real-estate-price-prediction/
         └── dvc.yml                 ✘
 ```
 
-> **Nota:** el directorio **no es todavía un repositorio Git** (`git init` pendiente).
+> **Nota:** el repositorio está versionado en
+> `https://github.com/matiasbelsito7/real-estate-price-prediction.git`; cada fase
+> se integra con pre-commit, se commitea y se pushea (workflow en §14).
 
 ---
 
@@ -582,16 +585,16 @@ real-estate-price-prediction/
 ### 9.4 Paquete `src/real_estate/` — subpaquetes
 
 Paquete descubrible vía `pyproject.toml` (layout `src/`). Import como
-`real_estate.*`. `ingestion/`, `curation/`, `features/` y `models/` ya están
-implementados (secciones 9.2, 9.3, 9.4b, 9.4c y 9.4d). Los siguientes
-subpaquetes existen pero están vacíos:
+`real_estate.*`. `ingestion/`, `curation/`, `features/`, `models/`,
+`tracking/` y `explainability/` ya están implementados (secciones 9.2, 9.3,
+9.4b, 9.4c, 9.4d y 9.4e). `utils/` existe pero está vacío:
 
 | Subpaquete | Responsabilidad |
 |---|---|
 | `features/` | ✔ Implementado: selección de columnas, target `log_precio_usd`, codificación ordinal por mediana de precio, imputación por mediana, splits train/val/test (sección 9.4b) |
 | `models/` | ✔ Implementado: entrenamiento y evaluación con preprocesamiento sin fuga (sección 9.4c) |
 | `tracking/` | ✔ Implementado: integración con MLflow — experimentos, params, métricas, artefactos y Model Registry (sección 9.4d) |
-| `explainability/` | SHAP analysis |
+| `explainability/` | ✔ Implementado: SHAP — valores y base, importancia global, figuras (beeswarm/barras) y guardado PNG (sección 9.4e) |
 | `utils/` | Utilidades transversales (config con pydantic-settings, logging, etc.) |
 
 #### 9.4b `features/` (implementado en la fase 4)
@@ -661,6 +664,32 @@ Resultado sobre el dataset real (fase 6): experimento
 y modelo `modelo_precio_propiedades` en el Model Registry (versión 1, con
 firma de entrada/salida para servir el modelo).
 
+#### 9.4e `explainability/` (implementado en la fase 7)
+
+| Archivo | Contenido |
+|---|---|
+| `shap_analysis.py` | `ExplicacionSHAP` (dataclass inmutable: `valores` (n, p), `base`, `nombres`; `importancia_global` = media \|SHAP\| por feature, desc), `calcular_shap` (ajusta `shap.TreeExplainer` sobre el modelo ya entrenado y explica una matriz preprocesada), `grafico_resumen` (beeswarm), `grafico_barras` (media \|SHAP\|), `guardar_figuras` (PNG a un directorio, creándolo) |
+
+Decisiones de diseño:
+- **Espacio logarítmico:** el target es `log_precio_usd`, por lo que cada valor
+  SHAP es la contribución al log precio y `exp(contribución)` es el factor
+  multiplicativo en USD sobre el precio.
+- **Propiedad aditiva como contrato:** `base + Σ valores ≈ predict(X)`; el
+  test unitario `test_propiedad_aditiva_suma_mas_base_igual_prediccion` la
+  verifica (`atol=1e-3`).
+- **Desacoplado del entrenamiento:** recibe el modelo ya ajustado y la matriz
+  ya preprocesada (misma codificación ordinal/imputación), sin tocar
+  `models/entrenamiento.py` — no hay fuga ni transformaciones inconsistentes.
+- **Figuras retornadas** como `Figure` de matplotlib (no `show()` dentro del
+  paquete) para que el llamador decida mostrarlas o persistirlas; el notebook
+  05 las guarda en `reports/figures/` (gitignored).
+
+Resultado sobre el dataset real (fase 7): sobre validación la propiedad
+aditiva se cumple con error máx. `8.6e-06`; top-3 por media |SHAP|
+`superficie_cubierta` (0.30), `barrio_ordinal` (0.14) y `expensas_usd` (0.07);
+base `exp(11.97) ≈ USD 158.234` (precio de referencia). Figuras
+`shap_resumen.png` y `shap_importancia.png` en `reports/figures/`.
+
 ### 9.5 `scripts/`
 
 | Script | Estado | Responsabilidad |
@@ -676,7 +705,7 @@ firma de entrada/salida para servir el modelo).
 `make train` ya existen (aceptan `ARGS="..."`). A medida que existan los
 demás scripts, se agregan targets `make evaluate`, `make explain`.
 
-### 9.6 `notebooks/` (01..04 ✔, 05 pendiente)
+### 9.6 `notebooks/` (01..05 ✔)
 
 | Notebook | Tema | Estado |
 |---|---|---|
@@ -684,7 +713,7 @@ demás scripts, se agregan targets `make evaluate`, `make explain`.
 | `02_eda_precio_y_caracteristicas.ipynb` | Distribución del target, outliers, precio vs características, correlaciones | ✔ ejecutado |
 | `03_feature_engineering.ipynb` | Construcción de la matriz de features (1.999×16), verificación ordinal, split 80/10/10 | ✔ ejecutado |
 | `04_model_analysis.ipynb` | Pipeline train/val/test sin fuga, preprocesamiento ajustado solo en train, baseline vs XGBoost, comparación en val, modelo final en test, error relativo (mediana 2,5 %) e importancia de features | ✔ ejecutado |
-| `05_shap_analysis.ipynb` | SHAP / explicabilidad | Pendiente |
+| `05_shap_analysis.ipynb` | SHAP sobre validación: valores y base, propiedad aditiva verificada (error máx. 8.6e-06), importancia global, beeswarm/barras, interpretación en USD vía `exp()`, figuras en `reports/figures/` | ✔ ejecutado |
 
 Nota: los notebooks se ejecutan headless con
 `python -m jupyter nbconvert --to notebook --execute --inplace` (backend Agg).
@@ -699,6 +728,7 @@ Nota: los notebooks se ejecutan headless con
 | `tests/unit/test_features.py` | `seleccionar_columnas`, `crear_target_log` (filtro de inválidos y de artefactos < 1.000 USD), `crear_orden_mediana`, `codificar_ordinal`, imputación, `construir_features` end-to-end y `dividir_train_val_test` (tamaños, disjunción, reproducibilidad) — 22 tests | ✔ |
 | `tests/unit/test_models.py` | `ajustar_preprocesamiento` (aprende ordenes e imputador, ignora columnas ausentes), `aplicar_preprocesamiento` (codifica/imputa, categoría solo en val -> `CODIGO_DESCONOCIDO`, no modifica el original), `separar_features_target`, `calcular_metricas`, `entrenar_baseline` (mediana), `entrenar_xgboost` (shape, reproducibilidad, params) y `entrenar_y_evaluar` end-to-end (supera al baseline) — 15 tests | ✔ |
 | `tests/unit/test_tracking.py` | `configurar_tracking` (crea experimento en store local, respeta env `MLFLOW_TRACKING_URI`), `registrar_resultado` (devuelve run_id + versión y cierra la corrida; loguea params, métricas, artefacto `resumen_entrenamiento.json`; modelo con firma en el Model Registry), versionado v1/v2 y `finalizar_corrida` — 7 tests | ✔ |
+| `tests/unit/test_explainability.py` | `calcular_shap` (forma, base finita, nombres; propiedad aditiva base + Σ ≈ predicción), `importancia_global` (todas las features, no negativa, descendente), `grafico_resumen`/`grafico_barras` (devuelven `Figure` con ejes), `guardar_figuras` (escribe PNG no vacíos) — 5 tests | ✔ |
 | `tests/integration/test_pipeline.py` | `curar_csv` end-to-end sobre CSV sintético (columnas del scraper), con tipo de cambio mockeado: conversión USD/ARS, indicadores `*_informado`, conversión de tipos textuales, `FileNotFoundError` | ✔ |
 
 Nota: las funciones de `transformations` que tocan la red se prueban con el
@@ -741,7 +771,7 @@ job de tests con matriz Python 3.11 / 3.12, instalando `pip install -e ".[dev]"`
 | Ruta | Estado | Nota |
 |---|---|---|
 | `models/` | 🏗 vacía | Artefactos de modelos (futuro) |
-| `reports/figures/` | 🏗 vacía | Figuras para reportes |
+| `reports/figures/` | ✔ en uso | Figuras SHAP del notebook 05 (gitignored; se regeneran con el notebook) |
 | `reports/metrics/` | 🏗 vacía | Métricas de evaluación |
 | `mlruns/` | ✔ en uso | Store local de MLflow (experimentos, corridas y repositorio de modelos; gitignored) |
 | `docs/architecture.md` | ✔ | Este documento (mapa vivo) |
@@ -776,13 +806,12 @@ job de tests con matriz Python 3.11 / 3.12, instalando `pip install -e ".[dev]"`
 - [x] Baseline
 - [x] XGBoost training pipeline
 - [x] MLflow tracking (`src/real_estate/tracking`)
+- [x] SHAP analysis (`src/real_estate/explainability`, notebook 05)
 - [ ] Model evaluation
-- [ ] SHAP analysis (`src/real_estate/explainability`, notebook 05)
 - [x] GitHub Actions (`ci.yml`); `dvc.yml` pendiente hasta implementar DVC
 - [ ] Dockerfile
 - [ ] docker-compose
 - [ ] Deployment / API
-- [ ] `git init` del repositorio
 
 ---
 
@@ -842,7 +871,14 @@ scripts/train.py ──→ src/real_estate/models/entrenamiento.py  (Baseline �
         ↓
 src/real_estate/tracking (MLflow: params / métricas / artefactos + Model Registry)
         ↓
-modelo_precio_propiedades (versión con firma) → explainability/ (SHAP) → Docker / Deployment
+modelo_precio_propiedades (versión con firma)
+        ↓
+notebooks/05_shap_analysis.ipynb ──→ src/real_estate/explainability/shap_analysis.py
+                                      (TreeExplainer sobre val → valores/base → figuras)
+        ↓
+reports/figures/ (shap_resumen.png, shap_importancia.png)
+        ↓
+Docker / Deployment
 ```
 
 ### Dependencias de software (ejemplo)
@@ -883,10 +919,12 @@ explain.py ──→ src/real_estate/explainability ──→ shap
 | `.github/workflows/dvc.yml` | No existe | Pendiente |
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) y `propiedades_argenprop_features.csv` (16 columnas) | ✔ |
-| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking) + integration (pipeline) — 116 tests | ✔ |
+| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking, explainability) + integration (pipeline) — 121 tests | ✔ |
 | `src/real_estate/models` | ✔ Implementado en la fase 5: `entrenamiento.py` (baseline, XGBoost, evaluación sin fuga) | ✔ |
-| `notebooks/` | ✔ 01..04 ejecutados (estructura/calidad, precio/características, feature engineering, model analysis); 05 pendiente | ✔ (parcial) |
-| `reports/`, `models/` | Vacías (esqueleto) | Pendiente |
+| `src/real_estate/explainability` | ✔ Implementado en la fase 7: `shap_analysis.py` (valores SHAP, base, importancia global, figuras) | ✔ |
+| `notebooks/` | ✔ 01..05 ejecutados (estructura/calidad, precio/características, feature engineering, model analysis, shap analysis) | ✔ |
+| `reports/figures/` | ✔ En uso: figuras SHAP del notebook 05 (gitignored) | ✔ |
+| `models/` | Vacía (esqueleto) | Pendiente |
 | `mlruns/` | ✔ En uso: store local de MLflow (experimentos, corridas, repositorio de modelos) — gitignored | ✔ |
 | Repositorio Git | ✔ Inicializado en `main`, remoto `origin` apuntando a GitHub (matiasbelsito7/real-estate-price-prediction), commit inicial pusheado | ✔ |
 | `README.md` | ✔ Actualizado: documenta scrape y curate vía `scripts/`; ya no menciona `scraper_argenprop2.py` | ✔ |
