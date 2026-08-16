@@ -432,7 +432,8 @@ real-estate-price-prediction/
 │   ├── curate.py                   ✔ (entry point de curación)
 │   ├── features.py                 ✔ (entry point de feature engineering)
 │   ├── train.py                    ✔ (entry point de modelado + tracking MLflow)
-│   └── exportar_modelo.py          ✔ fase 10 (entry point de exportación del bundle de serving)
+│   ├── exportar_modelo.py          ✔ fase 10 (entry point de exportación del bundle de serving)
+│   └── evaluar_nuevas.py           ✔ roadmap fase 2 (entry point de predicción sobre nuevas publicaciones)
 │   (se planifican evaluate/explain)
 │
 ├── tests/
@@ -785,6 +786,7 @@ subestima las altas (-15.8 % por encima de $235.000). Figuras
 | `features.py` | ✔ implementado | Orquestar el feature engineering (usa `src/real_estate/features`) |
 | `train.py` | ✔ implementado | Orquestar el entrenamiento + tracking MLflow (usa `src/real_estate/models` y `src/real_estate/tracking`; CLI `--input`, `--random-state` y `--no-tracking`) |
 | `exportar_modelo.py` | ✔ implementado (fase 10) | Entrenar sobre el curado y exportar el bundle de serving a `models/modelo_precio_propiedades/` (usa `src/real_estate/serving`; CLI `--input`, `--output`, `--random-state`) |
+| `evaluar_nuevas.py` | ✔ implementado (roadmap fase 2) | Predecir el precio de las nuevas publicaciones con el bundle de serving: cura el CSV de nuevas en memoria (`curar_dataset`), carga el modelo (`cargar_bundle`) y guarda `data/processed/propiedades_nuevas_evaluadas.csv` con `precio_predicho_usd` y `fecha_prediccion` (usa `src/real_estate/serving`; CLI `--input`, `--output`, `--modelo`) |
 | `evaluate.py` | ✘ pendiente | Evaluación de modelos |
 | `explain.py` | ✘ pendiente | Explicabilidad (SHAP) |
 
@@ -821,6 +823,7 @@ Nota: los notebooks se ejecutan headless con
 | `tests/unit/test_evaluacion.py` | `metricas_detalladas` (predicción perfecta → errores 0 y R² 1; consistencia con `calcular_metricas`), `tabla_residuos` (columnas, relaciones internas, exactitud), `resumen_errores` (claves, coherencia con la tabla, sesgo cero), `metricas_por_segmento` (n por grupo, NaN aparte), `bias_por_rango_precio` (bandas balanceadas y ordenadas), gráficos (devuelven `Figure`, PNG no vacíos) — 14 tests | ✔ |
 | `tests/unit/test_serving.py` | Fase 10: round-trip `guardar_bundle`/`cargar_bundle` (archivos escritos, `preprocesamiento.json` válido), `ModeloPrediccion` (USD = `exp(log)`, equivale al pipeline de entrenamiento, invariante al reorden de columnas, categoría desconocida → `CODIGO_DESCONOCIDO`, NaN imputado con la mediana del bundle) — 9 tests | ✔ |
 | `tests/integration/test_pipeline.py` | `curar_csv` end-to-end sobre CSV sintético (columnas del scraper), con tipo de cambio mockeado: conversión USD/ARS, indicadores `*_informado`, conversión de tipos textuales, `FileNotFoundError` | ✔ |
+| `tests/integration/test_evaluar_nuevas.py` | Roadmap fase 2: `evaluar_nuevas` end-to-end sobre CSV sintético de nuevas (bundle entrenado sobre datos sintéticos en `tmp_path`, tipo de cambio mockeado): columnas de salida, predicciones positivas y finitas, conserva `precio_usd` publicado (USD/ARS), `fecha_prediccion` = hoy, `FileNotFoundError` — 6 tests | ✔ |
 | `tests/integration/test_api.py` | Fase 10: `/health` (200, estado/modelo/versión/métricas del bundle), `/predict` (precio razonable y finito, `log` consistente, estable ante reorden del payload, indicadores `*_informado` derivados, imputación de faltantes, categoría desconocida, 422 con campos faltantes / indicador fuera de rango / valor negativo), arranque falla sin bundle — 11 tests | ✔ |
 
 Nota: las funciones de `transformations` que tocan la red se prueban con el
@@ -842,6 +845,7 @@ processed). DVC es dependencia dev (`pyproject.toml`).
 |---|---|---|---|
 | `curar` | `python scripts/curate.py` | `scripts/curate.py`, `src/real_estate/curation`, `data/raw/propiedades_argenprop.csv` | `data/processed/propiedades_argenprop_curado.csv` |
 | `features` | `python scripts/features.py` | `scripts/features.py`, `src/real_estate/features`, `data/processed/propiedades_argenprop_curado.csv` | `data/processed/propiedades_argenprop_features.csv` |
+| `evaluar_nuevas` | `python scripts/evaluar_nuevas.py` | `scripts/evaluar_nuevas.py`, `src/real_estate/serving`, `src/real_estate/curation`, `data/raw/propiedades_nuevas.csv`, `models/modelo_precio_propiedades/` | `data/processed/propiedades_nuevas_evaluadas.csv` |
 
 **Almacenamiento:** el contenido de los datos vive en el cache local
 `.dvc/cache` (gitignored) y en el remote por defecto `local` → `dvcstore/`
@@ -1100,6 +1104,8 @@ features.py ──→ src/real_estate/features ──→ scikit-learn / numpy / 
 train.py  ──→ src/real_estate/models ──→ scikit-learn / xgboost
              └──→ src/real_estate/tracking ──→ mlflow
 exportar_modelo.py ──→ src/real_estate/serving ──→ xgboost / pandas / numpy
+evaluar_nuevas.py ──→ src/real_estate/serving ──→ xgboost / pandas / numpy
+                 └──→ src/real_estate/curation ──→ pandas / numpy
 api/app.py ──→ src/real_estate/api ──→ fastapi / uvicorn / pydantic-settings
              └──→ src/real_estate/serving ──→ xgboost / pandas / numpy
 explain.py ──→ src/real_estate/explainability ──→ shap
@@ -1117,9 +1123,10 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `Makefile` | El archivo se llama `MakeFile` | Renombrar o aceptar el nombre actual |
 | `scripts/scrape.py` | ✔ Migrado: `src/real_estate/ingestion/scraper.py` + `scripts/scrape.py`. La raíz quedó limpia. **v3:** segmentación por barrio/tipo (54 barrios), manejo del cap 202, backoff y progreso JSON reanudable | ✔ |
 | `scripts/curate.py` | ✔ Implementado: `src/real_estate/curation/` (cleaning, transformations, validation, pipeline) + `scripts/curate.py` | ✔ |
-| `scripts/` | `scrape.py`, `scrape_nuevas.py`, `curate.py`, `features.py`, `train.py` y `download_tipo_cambio.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
+| `scripts/` | `scrape.py`, `scrape_nuevas.py`, `curate.py`, `features.py`, `train.py`, `exportar_modelo.py`, `evaluar_nuevas.py` y `download_tipo_cambio.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
 | `scripts/scrape_nuevas.py` | ✔ Implementado (fase 12 / roadmap): dataset separado de nuevas publicaciones con `revision_periodica` (re-escaneea segmentos completos, dedup interno al dataset de nuevas) | ✔ |
-| `docs/roadmap.md` | ✔ Creado: roadmap de predicción de precio + detección de oportunidades (buena/mala compra con score relativo), fases 1-6 con decisiones tomadas | ✔ |
+| `scripts/evaluar_nuevas.py` | ✔ Implementado (roadmap fase 2): predicción de precio sobre las nuevas publicaciones (`src/real_estate/serving/evaluar.py`): cura en memoria + carga del bundle + `precio_predicho_usd` y `fecha_prediccion` en `data/processed/propiedades_nuevas_evaluadas.csv` | ✔ |
+| `docs/roadmap.md` | ✔ Creado: roadmap de predicción de precio + detección de oportunidades (buena/mala compra con score relativo), fases 1-6 con decisiones tomadas. Fase 1 (scrape de nuevas) ✔ y fase 2 (predicción) ✔ | ✔ |
 | `configs/config.yaml` | Carpeta creada, sin archivo | Pendiente |
 | `dvc.yaml` / `dvc.lock` | ✔ Implementado: etapas `curar` y `features` con hashes md5. Remote por defecto `local` → `dvcstore/` | ✔ |
 | `Dockerfile` / `docker-compose.yml` | ✔ Implementado (fase 11): `Dockerfile` multi-stage + `requirements-api.txt` + `docker-compose.yml` con bundle montado como volumen de solo lectura | ✔ |
@@ -1128,7 +1135,7 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) y `propiedades_argenprop_features.csv` (16 columnas) | ✔ |
 | `data/external/` | Contiene `tipo_cambio_blue.csv` (5.702 fechas de dólar blue, trackeado con DVC; fuente primaria de `normalizar_moneda`, fallback a la API) | ✔ |
-| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion, serving) + integration (pipeline, API FastAPI) — 183 tests | ✔ |
+| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion, serving) + integration (pipeline, evaluar_nuevas, API FastAPI) — 189 tests | ✔ |
 | `src/real_estate/models` | ✔ Implementado en la fase 5: `entrenamiento.py` (baseline, XGBoost, evaluación sin fuga) | ✔ |
 | `src/real_estate/explainability` | ✔ Implementado en la fase 7: `shap_analysis.py` (valores SHAP, base, importancia global, figuras) | ✔ |
 | `src/real_estate/evaluacion` | ✔ Implementado en la fase 8: `analisis.py` (métricas detalladas, residuos, error por segmento, sesgo por rango, figuras) | ✔ |

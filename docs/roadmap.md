@@ -79,16 +79,18 @@ el dataset de entrenamiento.
 
 **Objetivo:** aplicar curación + features + modelo entrenado al dataset nuevo.
 
-- **Script:** `scripts/evaluar_nuevas.py`.
-  1. Curación del dataset de nuevas (misma pipeline: limpieza, normalización
-     de moneda a USD con el tipo de cambio de la fecha de scrape, expensas,
-     indicadores de missing).
-  2. Construcción de features con el mismo `features/pipeline.py` del
-     entrenamiento (consistencia de columnas garantizada).
-  3. Carga del modelo exportado (`src/real_estate/serving/modelo.py`) y
-     predicción de `precio_predicho_usd`.
+- **Script:** `scripts/evaluar_nuevas.py` (core en `src/real_estate/serving/evaluar.py`).
+  1. Curación del dataset de nuevas en memoria (misma pipeline: limpieza,
+     normalización de moneda a USD con el tipo de cambio de la fecha de
+     scrape, expensas, indicadores de missing) — `curar_dataset`.
+  2. Carga del bundle de serving exportado (`cargar_bundle`) y predicción de
+     `precio_predicho_usd` (replica las features del entrenamiento vía
+     `ModeloPrediccion`).
 - **Output:** `data/processed/propiedades_nuevas_evaluadas.csv` con
   `precio_predicho_usd` y `fecha_prediccion` (además del precio publicado en USD).
+- **Implementado ✔** (commit `bb6faab` es fase 1; fase 2 en este cambio):
+  tests de integración `tests/integration/test_evaluar_nuevas.py` (6 tests)
+  + entrada en `docs/architecture.md`.
 
 ---
 
@@ -158,8 +160,9 @@ relativo.
 
 ## 10. Orden de implementación
 
-1. **Fase 1** (dataset separado + programación) → base de todo. **EN CURSO.**
-2. **Fases 2 + 3** (predicción + clasificación) → el valor central.
+1. **Fase 1** (dataset separado + programación) → base de todo. **✔ COMPLETADA.**
+2. **Fases 2 + 3** (predicción + clasificación) → el valor central. **Fase 2 ✔
+   COMPLETADA** (script + tests + docs); **fase 3 EN CURSO.**
 3. **Fases 4 + 5** (modelos lineales + tuning) → en paralelo, ambos dependen
    solo del pipeline existente.
 4. **Fase 6** (MLflow) → transversal, se va haciendo en cada fase.
