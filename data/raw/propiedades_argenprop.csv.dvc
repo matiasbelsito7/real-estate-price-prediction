@@ -1,0 +1,5 @@
+outs:
+- md5: 9bd76247394ea67d10d43f0dcfebde62
+  size: 3477612
+  hash: md5
+  path: propiedades_argenprop.csv

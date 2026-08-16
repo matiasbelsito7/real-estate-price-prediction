@@ -1,0 +1,39 @@
+name: DVC
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validar-pipeline:
+    name: Validar pipeline de datos (DVC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias dev
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Listar etapas del pipeline
+        run: dvc stage list
+
+      - name: Verificar estado del pipeline
+        run: dvc status
+
+      - name: Restaurar datos desde el remote (si hay almacenamiento disponible)
+        run: |
+          if dvc pull 2>/dev/null; then
+            echo "Datos restaurados correctamente."
+          else
+            echo "AVISO: no se pudieron restaurar los datos en CI."
+            echo "El remote por defecto es local (dvcstore/), que no existe en GitHub Actions."
+            echo "La validación del pipeline ya se completó con 'dvc stage list' y 'dvc status'."
+          fi

@@ -1,0 +1,44 @@
+schema: '2.0'
+stages:
+  curar:
+    cmd: python scripts/curate.py
+    deps:
+    - path: data/raw/propiedades_argenprop.csv
+      hash: md5
+      md5: 9bd76247394ea67d10d43f0dcfebde62
+      size: 3477612
+    - path: scripts/curate.py
+      hash: md5
+      md5: 697efb247fa94dfc574321170efd2092
+      size: 1530
+    - path: src/real_estate/curation
+      hash: md5
+      md5: 40645821047fc3ba9da0a5fc348b8423.dir
+      size: 42446
+      nfiles: 10
+    outs:
+    - path: data/processed/propiedades_argenprop_curado.csv
+      hash: md5
+      md5: b7e51a42d82e956c7dd5ff177d985d61
+      size: 3527115
+  features:
+    cmd: python scripts/features.py
+    deps:
+    - path: data/processed/propiedades_argenprop_curado.csv
+      hash: md5
+      md5: b7e51a42d82e956c7dd5ff177d985d61
+      size: 3527115
+    - path: scripts/features.py
+      hash: md5
+      md5: a4c1f1398847abf10980d363a5175cf9
+      size: 2421
+    - path: src/real_estate/features
+      hash: md5
+      md5: 16a1e86d572332d6ebfdbab9714509a9.dir
+      size: 23911
+      nfiles: 6
+    outs:
+    - path: data/processed/propiedades_argenprop_features.csv
+      hash: md5
+      md5: 85bbe63db861cc0be83928bf466a7d1b
+      size: 172412

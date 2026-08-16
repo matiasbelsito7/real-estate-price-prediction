@@ -70,6 +70,13 @@ data/external/*
 !data/processed/.gitkeep
 !data/external/.gitkeep
 
+# Pointer files de DVC (versionan los datos; el contenido va al cache)
+!data/**/*.dvc
+
+# DVC cache y remote local por defecto
+.dvc/cache/
+dvcstore/
+
 # ============================================================
 # ML artifacts
 # ============================================================

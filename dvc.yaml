@@ -1,0 +1,17 @@
+stages:
+  curar:
+    cmd: python scripts/curate.py
+    deps:
+      - scripts/curate.py
+      - src/real_estate/curation
+      - data/raw/propiedades_argenprop.csv
+    outs:
+      - data/processed/propiedades_argenprop_curado.csv
+  features:
+    cmd: python scripts/features.py
+    deps:
+      - scripts/features.py
+      - src/real_estate/features
+      - data/processed/propiedades_argenprop_curado.csv
+    outs:
+      - data/processed/propiedades_argenprop_features.csv

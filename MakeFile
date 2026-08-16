@@ -1,4 +1,4 @@
-.PHONY: help install install-dev scrape curate features train format lint typecheck test coverage check clean
+.PHONY: help install install-dev scrape curate features train dvc-repro dvc-push dvc-pull dvc-status format lint typecheck test coverage check clean
 
 
 # ============================================================
@@ -25,6 +25,11 @@ help:
 	@echo "  make curate        Run Data Curation (scripts/curate.py)"
 	@echo "  make features      Run Feature Engineering (scripts/features.py)"
 	@echo "  make train         Run Model Training (scripts/train.py)"
+	@echo ""
+	@echo "  make dvc-repro     Run DVC data pipeline (dvc repro)"
+	@echo "  make dvc-push      Upload data to DVC remote (dvc push)"
+	@echo "  make dvc-pull      Download data from DVC remote (dvc pull)"
+	@echo "  make dvc-status    Show data pipeline status (dvc status)"
 	@echo ""
 	@echo "  make format        Format source code with Ruff"
 	@echo "  make lint          Run Ruff linter"
@@ -68,6 +73,26 @@ features:
 
 train:
 	$(PYTHON) scripts/train.py $(ARGS)
+
+
+# ============================================================
+# DVC (versionado de datos)
+# ============================================================
+
+dvc-repro:
+	dvc repro
+
+
+dvc-push:
+	dvc push
+
+
+dvc-pull:
+	dvc pull
+
+
+dvc-status:
+	dvc status
 
 
 # ============================================================

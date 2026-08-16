@@ -60,6 +60,9 @@ dev = [
 
     # Visualización (EDA)
     "matplotlib>=3.8,<4.0",
+
+    # Versionado de datos
+    "dvc>=3.0,<4.0",
 ]
 
 

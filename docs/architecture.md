@@ -74,9 +74,9 @@ Se debe demostrar:
 - **No agregar herramientas sin justificación.** Cada herramienta debe tener una
   responsabilidad clara dentro de la arquitectura.
 - **Optuna queda excluido** por decisión explícita (no se agregará por popularidad).
-- **DVC** todavía no figura como dependencia Python en `pyproject.toml` porque la
-  capa de versionado de datos aún no está implementada. Se agregará cuando exista
-  `dvc.yaml` / `dvc.lock`.
+- **DVC** es la dependencia (dev) encargada del versionado de datos. Vive como
+  `dvc` en `pyproject.toml` y opera sobre `dvc.yaml` / `dvc.lock` (commit) más el
+  cache local `.dvc/cache` (ignorado) y el remote local `dvcstore/` (ignorado).
 - **Incrementalidad:** antes de implementar una pieza nueva hay que definir qué
   responsabilidad tiene, en qué capa vive, de qué depende, qué depende de ella,
   cómo afecta al flujo de datos, cómo se testea y cómo se documenta en este archivo.
@@ -317,7 +317,7 @@ Validar que los datos tengan sentido y detectar anomalías:
 | Machine Learning | Scikit-learn, XGBoost | Modelos | ✔ dependencia |
 | Experiment tracking | MLflow | Seguimiento de experimentos | ✔ dependencia |
 | Explainable AI | SHAP | Explicabilidad de modelos | ✔ dependencia |
-| Data versioning | DVC | Versionado de datos | ✘ pendiente (aún no es dependencia) |
+| Data versioning | DVC | Versionado de datos | ✔ dependencia dev (`dvc.yaml` + `dvc.lock`) |
 | Testing | Pytest, pytest-cov | Tests | ✔ dependencia dev |
 | Code quality | Ruff, Mypy | Lint + type check | ✔ dependencia dev |
 | Git hooks | pre-commit | Gates antes del commit | ✔ dependencia dev |
@@ -326,8 +326,7 @@ Validar que los datos tengan sentido y detectar anomalías:
 | Configuración | Pydantic Settings, python-dotenv | Configuración y env vars | ✔ dependencia |
 | Jupyter | Jupyter, IPython kernel | Notebooks de análisis | ✔ dependencia dev |
 
-**Exclusiones explícitas:** Optuna (no se usará). DVC como dependencia aún no
-(se agrega cuando se implemente la capa).
+**Exclusiones explícitas:** Optuna (no se usará).
 
 ---
 
@@ -360,14 +359,15 @@ real-estate-price-prediction/
 │   └── config.yaml                🏗 carpeta creada, archivo pendiente
 │
 ├── data/
-│   ├── raw/    propiedades_argenprop.csv   ✔ (2.005 registros)
+│   ├── raw/    propiedades_argenprop.csv            ✔ (2.005 registros, trackeado por DVC)
+│   │           propiedades_argenprop.csv.dvc        ✔ (pointer de DVC, sí se versiona)
 │   ├── interim/                             🏗 vacía
-│   ├── processed/ propiedades_argenprop_curado.csv    ✔ (32 columnas)
-│   │              propiedades_argenprop_features.csv   ✔ (16 columnas, fase 4)
+│   ├── processed/ propiedades_argenprop_curado.csv  ✔ (32 columnas, output DVC etapa curar)
+│   │              propiedades_argenprop_features.csv ✔ (16 columnas, output DVC etapa features)
 │   └── external/                            🏗 vacía
 │
-├── dvc.yaml                        ✘
-├── dvc.lock                        ✘
+├── dvc.yaml                        ✔ (etapas curar y features)
+├── dvc.lock                        ✔ (hashes md5 de deps y outs)
 │
 ├── notebooks/                      ✔ 01_eda_estructura_y_calidad, 02_eda_precio_y_caracteristicas, 03_feature_engineering, 04_model_analysis, 05_shap_analysis, 06_model_evaluation
 │
@@ -421,7 +421,7 @@ real-estate-price-prediction/
 └── .github/
     └── workflows/
         ├── ci.yml                  ✔ (lint + type check + tests)
-        └── dvc.yml                 ✘
+        └── dvc.yml                 ✔ (valida etapas, estado y pull best-effort)
 ```
 
 > **Nota:** el repositorio está versionado en
@@ -458,8 +458,8 @@ real-estate-price-prediction/
 |---|---|
 | **Propósito** | Interfaz estándar para ejecutar tareas del proyecto |
 | **Responsabilidades** | Envolver comandos de instalación, calidad, testing y limpieza |
-| **Targets actuales** | `install`, `install-dev`, `scrape`, `curate`, `features`, `train`, `format`, `lint`, `typecheck`, `test`, `coverage`, `check`, `clean` (además de `help`) |
-| **Targets futuros** | `evaluate`, `explain`, `dvc`, `docker-...` — solo cuando los componentes existan realmente |
+| **Targets actuales** | `install`, `install-dev`, `scrape`, `curate`, `features`, `train`, `dvc-repro`, `dvc-push`, `dvc-pull`, `dvc-status`, `format`, `lint`, `typecheck`, `test`, `coverage`, `check`, `clean` (además de `help`) |
+| **Targets futuros** | `evaluate`, `explain`, `docker-...` — solo cuando los componentes existan realmente |
 | **Dependencias** | `pyproject.toml` (comandos pip/pytest/ruff/mypy) |
 | **Usado por** | Desarrolladores, CI (futuro) |
 | **Nota** | El esquema conceptual lo llama `Makefile`; el archivo real en disco es `MakeFile`. |
@@ -778,10 +778,36 @@ módulo `requests` mockeado; ningún test hace requests reales.
 Configuración centralizada del proyecto (parámetros de scraper, curación,
 entrenamiento, MLflow). Se cargaría vía pydantic-settings.
 
-### 9.9 DVC (pendiente)
+### 9.9 DVC (versionado de datos)
 
-`dvc.yaml` + `dvc.lock` para versionar datos (raw → curation → processed).
-Workflow de DVC en `.github/workflows/dvc.yml` (pendiente).
+`dvc.yaml` + `dvc.lock` versionan el pipeline y los datos (raw → curation →
+processed). DVC es dependencia dev (`pyproject.toml`).
+
+**Etapas del pipeline:**
+
+| Etapa | Comando | Dependencias | Outputs |
+|---|---|---|---|
+| `curar` | `python scripts/curate.py` | `scripts/curate.py`, `src/real_estate/curation`, `data/raw/propiedades_argenprop.csv` | `data/processed/propiedades_argenprop_curado.csv` |
+| `features` | `python scripts/features.py` | `scripts/features.py`, `src/real_estate/features`, `data/processed/propiedades_argenprop_curado.csv` | `data/processed/propiedades_argenprop_features.csv` |
+
+**Almacenamiento:** el contenido de los datos vive en el cache local
+`.dvc/cache` (gitignored) y en el remote por defecto `local` → `dvcstore/`
+(gitignored). Los pointer files `data/raw/propiedades_argenprop.csv.dvc` y
+`dvc.lock` sí se versionan en git (guardan los hashes md5 de cada archivo).
+
+**Flujo típico:**
+
+```text
+dvc repro     # reproduce las etapas (solo si algo cambió)
+dvc push      # sube datos al remote (local: dvcstore/)
+dvc pull      # baja datos del remote (otra máquina / CI)
+dvc status    # compara workspace vs remote
+```
+
+**Remote de producción:** para colaborar o CI real conviene cambiar el remote
+por defecto a uno en la nube (S3, GCS, DAGsHub o Google Drive), p. ej.:
+`dvc remote add -d storage s3://bucket/real-estate-dvc`. El remote local
+`dvcstore/` queda como default para que el flujo funcione out-of-the-box.
 
 ### 9.10 Docker (pendiente)
 
@@ -793,7 +819,14 @@ de predicción (deployment).
 `ci.yml` (`.github/workflows/ci.yml`): ejecuta Ruff (check + formato), Mypy y
 Pytest con cobertura en GitHub Actions. Un job de calidad (Python 3.12) y un
 job de tests con matriz Python 3.11 / 3.12, instalando `pip install -e ".[dev]"`.
-`dvc.yml`: reproducir el pipeline de datos (pendiente hasta implementar DVC).
+
+`dvc.yml` (`.github/workflows/dvc.yml`): valida el pipeline de datos. Lista las
+etapas definidas (`dvc stage list`), verifica el estado de deps/outs contra el
+lock (`dvc status`) e intenta restaurar los datos con `dvc pull`. El pull es
+best-effort: si falla (el remote por defecto es local, `dvcstore/`, que no
+existe en CI), el job igualmente termina en éxito con un aviso, porque la
+validación real es de la definición del pipeline. Se dispara en push/PR a
+`main` y manualmente (`workflow_dispatch`).
 
 ### 9.12 Datos
 
@@ -838,7 +871,7 @@ job de tests con matriz Python 3.11 / 3.12, instalando `pip install -e ".[dev]"`
 ### ❌ Pendiente
 
 - [x] Tests del código del proyecto (`tests/`) — unit (cleaning, scraper, transformations, features) + integración (pipeline)
-- [ ] DVC (`dvc.yaml`, `dvc.lock`, dependencia)
+- [x] DVC (`dvc.yaml`, `dvc.lock`, dependencia dev, remote local `dvcstore/`)
 - [x] EDA estructurado (notebooks 01 y 02, ejecutados headless)
 - [x] Feature Engineering (`src/real_estate/features`, notebook 03)
 - [x] Pipeline Train / Validation / Test
@@ -847,7 +880,7 @@ job de tests con matriz Python 3.11 / 3.12, instalando `pip install -e ".[dev]"`
 - [x] MLflow tracking (`src/real_estate/tracking`)
 - [x] SHAP analysis (`src/real_estate/explainability`, notebook 05)
 - [x] Model evaluation (`src/real_estate/evaluacion`, notebook 06)
-- [x] GitHub Actions (`ci.yml`); `dvc.yml` pendiente hasta implementar DVC
+- [x] GitHub Actions (`ci.yml` + `dvc.yml`)
 - [ ] Dockerfile
 - [ ] docker-compose
 - [ ] Deployment / API
@@ -891,20 +924,21 @@ Docker build
 ```text
 scripts/scrape.py ──→ src/real_estate/ingestion/scraper.py
         ↓
-data/raw/propiedades_argenprop.csv
+data/raw/propiedades_argenprop.csv                  ◄─ DVC (pointer .dvc + cache)
         ↓
 scripts/curate.py ──→ src/real_estate/curation/pipeline.py
                       ├── cleaning.py
                       ├── transformations.py
                       └── validation.py
         ↓
-data/processed/propiedades_argenprop_curado.csv
+data/processed/propiedades_argenprop_curado.csv     ◄─ DVC (output etapa curar)
         ↓
 scripts/features.py ──→ src/real_estate/features/
                         ├── transformations.py
                         └── pipeline.py
         ↓
-data/processed/propiedades_argenprop_features.csv   (1.999 × 16, sin faltantes)
+data/processed/propiedades_argenprop_features.csv   ◄─ DVC (output etapa features)
+                                                     (1.999 × 16, sin faltantes)
         ↓
 scripts/train.py ──→ src/real_estate/models/entrenamiento.py  (Baseline → XGBoost)
         ↓
@@ -956,10 +990,10 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `scripts/curate.py` | ✔ Implementado: `src/real_estate/curation/` (cleaning, transformations, validation, pipeline) + `scripts/curate.py` | ✔ |
 | `scripts/` con 5 scripts | `scrape.py`, `curate.py`, `features.py` y `train.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
 | `configs/config.yaml` | Carpeta creada, sin archivo | Pendiente |
-| `dvc.yaml` / `dvc.lock` | No existen | Pendiente |
+| `dvc.yaml` / `dvc.lock` | ✔ Implementado: etapas `curar` y `features` con hashes md5. Remote por defecto `local` → `dvcstore/` | ✔ |
 | `Dockerfile` / `docker-compose.yml` | No existen | Pendiente |
 | `.github/workflows/ci.yml` | ✔ Implementado: lint (Ruff), type check (Mypy) y tests (Pytest + cobertura) en Python 3.11/3.12 | ✔ |
-| `.github/workflows/dvc.yml` | No existe | Pendiente |
+| `.github/workflows/dvc.yml` | ✔ Implementado: valida etapas (`stage list`), estado (`status`) y `pull` best-effort | ✔ |
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) y `propiedades_argenprop_features.csv` (16 columnas) | ✔ |
 | `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion) + integration (pipeline) — 135 tests | ✔ |
