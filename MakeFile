@@ -1,0 +1,107 @@
+.PHONY: help install install-dev scrape curate format lint typecheck test coverage check clean
+
+
+# ============================================================
+# Variables
+# ============================================================
+
+PYTHON := python
+PIP := $(PYTHON) -m pip
+
+
+# ============================================================
+# Help
+# ============================================================
+
+help:
+	@echo "Real Estate Price Prediction"
+	@echo ""
+	@echo "Available commands:"
+	@echo ""
+	@echo "  make install       Install production dependencies"
+	@echo "  make install-dev   Install development dependencies"
+	@echo ""
+	@echo "  make scrape        Run the Argenprop scraper (scripts/scrape.py)"
+	@echo "  make curate        Run Data Curation (scripts/curate.py)"
+	@echo ""
+	@echo "  make format        Format source code with Ruff"
+	@echo "  make lint          Run Ruff linter"
+	@echo "  make typecheck     Run Mypy type checking"
+	@echo "  make test          Run test suite"
+	@echo "  make coverage      Run tests with coverage"
+	@echo "  make check         Run all quality checks"
+	@echo ""
+	@echo "  make clean         Remove generated files"
+	@echo ""
+	@echo "  Extra args:        make scrape ARGS=\"--max-paginas 5\""
+
+
+# ============================================================
+# Installation
+# ============================================================
+
+install:
+	$(PIP) install .
+
+
+install-dev:
+	$(PIP) install -e ".[dev]"
+
+
+# ============================================================
+# Pipeline
+# ============================================================
+
+scrape:
+	$(PYTHON) scripts/scrape.py $(ARGS)
+
+
+curate:
+	$(PYTHON) scripts/curate.py $(ARGS)
+
+
+# ============================================================
+# Code Quality
+# ============================================================
+
+format:
+	ruff format src tests
+
+
+lint:
+	ruff check src tests
+
+
+typecheck:
+	mypy src tests
+
+
+# ============================================================
+# Testing
+# ============================================================
+
+test:
+	pytest
+
+
+coverage:
+	pytest --cov=src/real_estate --cov-report=term-missing
+
+
+# ============================================================
+# Quality Gate
+# ============================================================
+
+check:
+	ruff format --check src tests
+	ruff check src tests
+	mypy src tests
+	pytest
+
+
+# ============================================================
+# Cleanup
+# ============================================================
+
+clean:
+	$(PYTHON) -c "import shutil; from pathlib import Path; [shutil.rmtree(p, ignore_errors=True) for p in [Path('.pytest_cache'), Path('.mypy_cache'), Path('.ruff_cache'), Path('htmlcov')]]"
