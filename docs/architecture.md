@@ -91,6 +91,18 @@ El scraper (`src/real_estate/ingestion/scraper.py`, invocado por
 `scripts/scrape.py`) obtiene avisos de **venta** de todo tipo de propiedad
 (departamentos, casas, PH, etc.) publicados en **Capital Federal**.
 
+**Límite del sitio (v3):** Argenprop **corta toda búsqueda en la página 100**
+con un HTTP 202 vacío (≈ 2.000 avisos por búsqueda), aunque el widget de
+paginación muestre miles de páginas. Para superarlo se **segmenta la búsqueda**
+por barrio (54 barrios de CABA) y/o tipo de propiedad; cada segmento tiene su
+propio paginado y su propio cap de 100 páginas. El HTTP 202 también se usa como
+**throttle anti-bot** ante rafagas de requests sostenidas; el scraper lo
+distingue por página: en la página 100 es el cap del servidor (no se reintenta),
+en páginas tempranas es un bloqueo transitorio (reintento con backoff
+exponencial). El progreso por segmento se guarda en un JSON
+(`--progreso`), de modo que una corrida interrumpida reanuda desde la última
+página procesada y los segmentos completos se saltan.
+
 **Decisión de diseño clave — separación de etapas:**
 
 ```text
@@ -520,14 +532,14 @@ real-estate-price-prediction/
 |---|---|
 | **Ruta** | `src/real_estate/ingestion/scraper.py` |
 | **Propósito** | Obtener avisos de venta de propiedades en CABA desde Argenprop |
-| **Responsabilidades** | Paginar el listado, parsear tarjetas (Requests + BeautifulSoup + lxml), extraer los 20 campos, guardar CSV incrementalmente |
-| **Estado** | ✔ Funcional, probado con datos reales |
+| **Responsabilidades** | Paginar el listado, parsear tarjetas (Requests + BeautifulSoup + lxml), extraer los 20 campos, guardar CSV incrementalmente, segmentar la búsqueda para superar el cap de 100 páginas del sitio, manejar el bloqueo HTTP 202 con backoff y guardar el progreso por segmento para reanudar corridas interrumpidas |
+| **Estado** | ✔ Funcional, probado con datos reales. **v3 (feb 2026):** segmentación por barrio/tipo, manejo del cap 202, reintentos con backoff y progreso JSON |
 | **Dependencias** | `requests`, `beautifulsoup4`, `lxml` |
-| **Constantes** | `BASE_URL`, `HEADERS`, `COLUMNS` (20), `TIPOS_PROPIEDAD` (18), `ICONO_A_COLUMNA`, `RE_AMBIENTES_EN_URL` |
-| **Funciones** | `construir_url_pagina`, `texto_o_none`, `detectar_tipo_propiedad`, `extraer_ambientes_de_url`, `extraer_features_de_tarjeta`, `parsear_listing`, `cargar_ids_existentes`, `asegurar_encabezado`, `guardar_filas`, `scrapear` |
-| **Comportamiento** | Resumen por `id`: si se corta, al volver a correr no re-baja avisos ya presentes. Precio/moneda desde atributos `data` del link; ambientes desde la URL del aviso; alerta si 3 páginas seguidas no traen features (cambio de estructura del sitio) |
+| **Constantes** | `BASE_URL`, `HEADERS`, `COLUMNS` (20), `TIPOS_PROPIEDAD` (18), `ICONO_A_COLUMNA`, `RE_AMBIENTES_EN_URL`, `STATUS_BLOQUEO` (202), `MAX_PAGINAS_SERVICIO` (100), `BARRIOS_CABA` (54 slugs) |
+| **Funciones** | `construir_url_pagina` (con `base_url` para segmentos), `construir_url_segmento` (tipo/barrio), `texto_o_none`, `detectar_tipo_propiedad`, `extraer_ambientes_de_url`, `extraer_features_de_tarjeta`, `parsear_listing`, `cargar_ids_existentes`, `asegurar_encabezado`, `guardar_filas`, `cargar_progreso`, `guardar_progreso`, `pagina_de_reanudacion`, `scrapear` |
+| **Comportamiento** | Resumen por `id`: si se corta, al volver a correr no re-baja avisos ya presentes. Precio/moneda desde atributos `data` del link; ambientes desde la URL del aviso; alerta si 3 páginas seguidas no traen features (cambio de estructura del sitio). **202:** si `pagina >= 100` es el cap del servidor → segmento completo; si no, reintenta con backoff exponencial (`backoff_202_inicial * 2^n`, máx 120 s), pausa larga (`pausa_bloqueo`) al agotar los reintentos (máx 2) y luego abandona el segmento como incompleto. 404 y página vacía → segmento completo. Guarda `{"pagina": ultima_ok, "completo": bool}` en el archivo de progreso tras cada página |
 | **Usado por** | `scripts/scrape.py` |
-| **Outputs** | `data/raw/propiedades_argenprop.csv` (o `--output`) |
+| **Outputs** | `data/raw/propiedades_argenprop.csv` (o `--output`), `data/raw/progreso_scrape.json` (o `--progreso`) |
 | **Relación** | Alimenta la etapa de Data Curation. `banos`/`cocheras` quedan mayormente vacíos por limitación del listado (no es un bug) |
 
 #### `scripts/scrape.py`
@@ -536,11 +548,12 @@ real-estate-price-prediction/
 |---|---|
 | **Ruta** | `scripts/scrape.py` |
 | **Propósito** | Entry point CLI de adquisición de datos |
-| **Responsabilidades** | Parser de argumentos, bootstrap de `sys.path` para importar `real_estate` sin instalar el paquete, manejo de `KeyboardInterrupt` |
-| **CLI** | `--output`, `--max-paginas`, `--pagina-inicio`, `--delay-min`, `--delay-max`, `--html-debug` |
-| **Usa** | `real_estate.ingestion.scraper.scrapear` |
+| **Responsabilidades** | Parser de argumentos, bootstrap de `sys.path` para importar `real_estate` sin instalar el paquete, manejo de `KeyboardInterrupt`, orquestar segmentos (uno por barrio y/o tipo) |
+| **CLI** | `--output`, `--max-paginas`, `--pagina-inicio`, `--delay-min`, `--delay-max`, `--html-debug`, `--tipo` (departamentos, casas, ph…), `--barrios` (slugs separados por coma), `--todos-los-barrios` (54 segmentos), `--progreso`, `--reintentos-202`, `--backoff-202`, `--pausa-bloqueo` |
+| **Usa** | `real_estate.ingestion.scraper.scrapear`, `construir_url_segmento`, `BARRIOS_CABA` |
 | **Usado por** | `make scrape` (MakeFile) |
-| **Outputs** | CSV en `data/raw/` |
+| **Outputs** | CSV en `data/raw/` + JSON de progreso |
+| **Uso típico** | `python scripts/scrape.py --todos-los-barrios --tipo departamentos` recorre 54 segmentos (≈ 108.000 avisos potenciales); `python scripts/scrape.py --barrios palermo,recoleta,caballito` acota a 3 segmentos |
 
 ### 9.3 Capa de CURATION — `src/real_estate/curation/`
 
@@ -784,7 +797,7 @@ Nota: los notebooks se ejecutan headless con
 | Ruta | Contenido | Estado |
 |---|---|---|
 | `tests/unit/test_cleaning.py` | `limpiar_numero` (14 formatos reales de Argenprop), `limpiar_columnas_numericas`, `limpiar_expensas`, `preparar_fecha` | ✔ |
-| `tests/unit/test_scraper.py` | `parsear_listing` (tarjeta completa y mínima, swap Capital Federal, fallback de moneda por `idmoneda`), helpers de URL/tipo/ambientes, ciclo CSV (header/append/ids) | ✔ |
+| `tests/unit/test_scraper.py` | `parsear_listing` (tarjeta completa y mínima, swap Capital Federal, fallback de moneda por `idmoneda`), helpers de URL/tipo/ambientes, ciclo CSV (header/append/ids), `construir_url_segmento` (tipo/barrio), progreso (guardar/cargar/corrupto/reanudación), `scrapear` con 202 (cap en página 100 → completo sin reintentar; 202 temprano → reintenta y avanza; bloqueo sostenido → incompleto y reanudable; segmento completo se saltea; reanudación desde última página guardada; cap respetado aunque `reintentos-202` sea alto) — 39 tests | ✔ |
 | `tests/unit/test_transformations.py` | `obtener_tipo_cambio` (mock de `requests`: dict/lista/sin venta/error de red/retroceso de día), `construir_tabla_tipo_cambio`, `normalizar_moneda` (USD/ARS/moneda desconocida/columnas faltantes), `normalizar_expensas`, `crear_indicadores_missing` | ✔ |
 | `tests/unit/test_features.py` | `seleccionar_columnas`, `crear_target_log` (filtro de inválidos y de artefactos < 1.000 USD), `crear_orden_mediana`, `codificar_ordinal`, imputación, `construir_features` end-to-end y `dividir_train_val_test` (tamaños, disjunción, reproducibilidad) — 22 tests | ✔ |
 | `tests/unit/test_models.py` | `ajustar_preprocesamiento` (aprende ordenes e imputador, ignora columnas ausentes), `aplicar_preprocesamiento` (codifica/imputa, categoría solo en val -> `CODIGO_DESCONOCIDO`, no modifica el original), `separar_features_target`, `calcular_metricas`, `entrenar_baseline` (mediana), `entrenar_xgboost` (shape, reproducibilidad, params) y `entrenar_y_evaluar` end-to-end (supera al baseline) — 15 tests | ✔ |
@@ -921,7 +934,7 @@ validación real es de la definición del pipeline. Se dispara en push/PR a
 
 | Ruta | Contenido | Estado |
 |---|---|---|
-| `data/raw/propiedades_argenprop.csv` | Dataset crudo, 2.005 registros, 20 columnas | ✔ |
+| `data/raw/propiedades_argenprop.csv` | Dataset crudo, 2.005 registros, 20 columnas (el cap de 100 páginas limitaba la campaña; con segmentación se apunta a ≥ 10.000) | ✔ |
 | `data/interim/` | Datos intermedios (p. ej., entre curación y features) | 🏗 vacía |
 | `data/processed/propiedades_argenprop_curado.csv` | Dataset curado, 2.005 filas, 32 columnas (listo para EDA/features) | ✔ |
 | `data/processed/propiedades_argenprop_features.csv` | Matriz de features, 1.999 filas × 16 columnas, 0 faltantes (lista para modelar) | ✔ |
@@ -945,7 +958,7 @@ validación real es de la definición del pipeline. Se dispara en push/PR a
 
 - [x] Idea y problema definidos
 - [x] Fuente de datos real seleccionada (Argenprop)
-- [x] Scraper desarrollado y refactorizado (`src/real_estate/ingestion/scraper.py` + `scripts/scrape.py`)
+- [x] Scraper desarrollado y refactorizado (`src/real_estate/ingestion/scraper.py` + `scripts/scrape.py`), **v3**: segmentación por barrio/tipo para superar el cap de 100 páginas, manejo del 202 con backoff y progreso reanudable
 - [x] Scraper probado con datos reales
 - [x] Dataset raw generado (`data/raw/propiedades_argenprop.csv`)
 - [x] Data Curation implementada (`src/real_estate/curation/`: cleaning, transformations, validation, pipeline + `scripts/curate.py`)
@@ -1086,7 +1099,7 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | Concepto | Realidad | Acción |
 |---|---|---|
 | `Makefile` | El archivo se llama `MakeFile` | Renombrar o aceptar el nombre actual |
-| `scripts/scrape.py` | ✔ Migrado: `src/real_estate/ingestion/scraper.py` + `scripts/scrape.py`. La raíz quedó limpia | ✔ |
+| `scripts/scrape.py` | ✔ Migrado: `src/real_estate/ingestion/scraper.py` + `scripts/scrape.py`. La raíz quedó limpia. **v3:** segmentación por barrio/tipo (54 barrios), manejo del cap 202, backoff y progreso JSON reanudable | ✔ |
 | `scripts/curate.py` | ✔ Implementado: `src/real_estate/curation/` (cleaning, transformations, validation, pipeline) + `scripts/curate.py` | ✔ |
 | `scripts/` con 5 scripts | `scrape.py`, `curate.py`, `features.py` y `train.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
 | `configs/config.yaml` | Carpeta creada, sin archivo | Pendiente |
@@ -1096,7 +1109,7 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `.github/workflows/dvc.yml` | ✔ Implementado: valida etapas (`stage list`), estado (`status`) y `pull` best-effort | ✔ |
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) y `propiedades_argenprop_features.csv` (16 columnas) | ✔ |
-| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion, serving) + integration (pipeline, API FastAPI) — 155 tests | ✔ |
+| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion, serving) + integration (pipeline, API FastAPI) — 174 tests | ✔ |
 | `src/real_estate/models` | ✔ Implementado en la fase 5: `entrenamiento.py` (baseline, XGBoost, evaluación sin fuga) | ✔ |
 | `src/real_estate/explainability` | ✔ Implementado en la fase 7: `shap_analysis.py` (valores SHAP, base, importancia global, figuras) | ✔ |
 | `src/real_estate/evaluacion` | ✔ Implementado en la fase 8: `analisis.py` (métricas detalladas, residuos, error por segmento, sesgo por rango, figuras) | ✔ |

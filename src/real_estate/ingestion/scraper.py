@@ -15,12 +15,24 @@ los atributos de datos del propio link del aviso (id, dormitorios,
 precio, moneda) en vez de depender solo de parsear texto, porque son
 más confiables.
 
+v3: agrega soporte para superar el cap de 100 páginas por búsqueda que
+impone el sitio (HTTP 202 con cuerpo vacío a partir de la página 100 =
+2000 avisos por búsqueda). Se scrapea segmentando por barrio y/o tipo
+de propiedad, cada segmento con su propio paginado. Además maneja el
+throttling anti-bot (202 también en páginas tempranas si el ritmo es
+muy alto) con backoff exponencial + pausa larga, y persiste el progreso
+por segmento para poder reanudar una corrida interrumpida.
+
 NOTAS
 -----
 - Este scraper respeta al sitio: agrega delays entre requests y un
   User-Agent estándar. Si el sitio empieza a devolver errores o
   captchas de forma sostenida, es señal de que hay que bajar el ritmo
   (aumentar delay_min/delay_max) o parar.
+- El sitio corta toda búsqueda en la página 100 (HTTP 202 vacío),
+  aunque el widget de paginación muestre miles de páginas. Para
+  acumular más de 2000 avisos hay que recorrer varios segmentos
+  (barrios/tipos), cada uno con su propio cap de 100 páginas.
 - Cada tarjeta de aviso en el listado solo muestra 2-3 características
   (de un conjunto variable: superficie cubierta, dormitorios,
   antigüedad, baños, ambientes). Por eso varias columnas van a tener
@@ -37,6 +49,7 @@ NOTAS
 from __future__ import annotations
 
 import csv
+import json
 import os
 import random
 import re
@@ -48,6 +61,75 @@ import requests
 from bs4 import BeautifulSoup
 
 BASE_URL = "https://www.argenprop.com/inmuebles/venta/capital-federal"
+
+# El sitio responde HTTP 202 con cuerpo vacío cuando (a) se supera el cap
+# de páginas de una búsqueda o (b) detecta un ritmo de requests demasiado
+# alto (throttling anti-bot). El cap es de 100 páginas x 20 avisos = 2000
+# resultados por búsqueda; el widget de paginación muestra más páginas,
+# pero el servidor nunca las entrega.
+STATUS_BLOQUEO = 202
+MAX_PAGINAS_SERVICIO = 100
+
+# Slugs de los 54 barrios de Capital Federal, tal como los expone el
+# filtro de ubicación del sitio. Se usan para segmentar la búsqueda y
+# superar el cap de 2000 avisos por búsqueda.
+BARRIOS_CABA = [
+    "abasto",
+    "agronomia",
+    "almagro",
+    "balvanera",
+    "barracas",
+    "barrio-norte",
+    "barrio-santa-rita",
+    "belgrano",
+    "boca",
+    "boedo",
+    "caballito",
+    "centro",
+    "chacarita",
+    "coghlan",
+    "colegiales",
+    "congreso",
+    "constitucion",
+    "flores",
+    "floresta",
+    "liniers",
+    "mataderos",
+    "monserrat",
+    "monte-castro",
+    "nunez",
+    "once",
+    "palermo",
+    "parque-avellaneda",
+    "parque-centenario",
+    "parque-chacabuco",
+    "parque-chas",
+    "parque-patricios",
+    "paternal",
+    "pompeya",
+    "puerto-madero",
+    "recoleta",
+    "retiro",
+    "saavedra",
+    "san-cristobal",
+    "san-nicolas",
+    "san-telmo",
+    "velez-sarsfield",
+    "versalles",
+    "villa-crespo",
+    "villa-del-parque",
+    "villa-devoto",
+    "villa-general-mitre",
+    "villa-lugano",
+    "villa-luro",
+    "villa-ortuzar",
+    "villa-pueyrredon",
+    "villa-real",
+    "villa-riachuelo",
+    "villa-soldati",
+    "villa-urquiza",
+]
+
 HEADERS: dict[str, str] = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -118,10 +200,26 @@ ICONO_A_COLUMNA = {
 RE_AMBIENTES_EN_URL = re.compile(r"-(\d+)-ambientes?--\d+$")
 
 
-def construir_url_pagina(pagina: int) -> str:
+def construir_url_segmento(tipo: str | None = None, barrio: str | None = None) -> str:
+    """Construye la URL base de un segmento de búsqueda.
+
+    Sin filtros usa la búsqueda completa de Capital Federal. Con `tipo`
+    (p. ej. "departamentos" o "casas") restringe el tipo de propiedad, y
+    con `barrio` (slug, p. ej. "palermo") restringe a un barrio. Cada
+    segmento tiene su propio paginado y su propio cap de 100 páginas.
+    """
+    url = BASE_URL
+    if tipo:
+        url = f"https://www.argenprop.com/inmuebles/{tipo}-en-venta/capital-federal"
+    if barrio:
+        url = f"{url}/{barrio}"
+    return url
+
+
+def construir_url_pagina(pagina: int, base_url: str = BASE_URL) -> str:
     if pagina <= 1:
-        return BASE_URL
-    return f"{BASE_URL}?pagina-{pagina}"
+        return base_url
+    return f"{base_url}?pagina-{pagina}"
 
 
 def texto_o_none(elemento: Any) -> str | None:
@@ -274,6 +372,47 @@ def guardar_filas(output_path: str, filas: list[dict[str, Any]]) -> None:
             writer.writerow(fila)
 
 
+# ---------------------------------------------------------------------------
+# Progreso por segmento (para reanudar corridas interrumpidas)
+# ---------------------------------------------------------------------------
+
+
+def cargar_progreso(archivo_progreso: str) -> dict[str, Any]:
+    """Lee el archivo de progreso JSON. Devuelve {} si no existe o está corrupto."""
+    if not os.path.exists(archivo_progreso):
+        return {}
+    try:
+        with open(archivo_progreso, encoding="utf-8") as f:
+            contenido = json.load(f)
+        return contenido if isinstance(contenido, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def guardar_progreso(archivo_progreso: str, estado: dict[str, Any]) -> None:
+    """Escribe el estado de progreso de todos los segmentos."""
+    directorio = os.path.dirname(os.path.abspath(archivo_progreso))
+    os.makedirs(directorio, exist_ok=True)
+    with open(archivo_progreso, "w", encoding="utf-8") as f:
+        json.dump(estado, f, ensure_ascii=False, indent=2)
+
+
+def pagina_de_reanudacion(archivo_progreso: str, nombre_segmento: str) -> int | None:
+    """Página desde la que reanudar un segmento, o None si no hay progreso.
+
+    Devuelve None si el segmento no existe en el progreso o ya quedó
+    marcado como completo. Si quedó a mitad, devuelve la última página
+    procesada con éxito + 1.
+    """
+    segmento = cargar_progreso(archivo_progreso).get(nombre_segmento)
+    if not segmento or segmento.get("completo"):
+        return None
+    ultima_pagina = segmento.get("pagina")
+    if not isinstance(ultima_pagina, int):
+        return None
+    return ultima_pagina + 1
+
+
 def scrapear(
     output_path: str,
     max_paginas: int | None,
@@ -281,25 +420,47 @@ def scrapear(
     delay_min: float,
     delay_max: float,
     html_debug: str | None = None,
+    base_url: str = BASE_URL,
+    nombre_segmento: str = "global",
+    archivo_progreso: str | None = None,
+    reintentos_202: int = 5,
+    backoff_202_inicial: float = 15.0,
+    pausa_bloqueo: float = 300.0,
 ) -> None:
     asegurar_encabezado(output_path)
     ids_existentes = cargar_ids_existentes(output_path)
     print(f"IDs ya guardados previamente: {len(ids_existentes)}")
+
+    estado_progreso: dict[str, Any] = {}
+    if archivo_progreso:
+        estado_progreso = cargar_progreso(archivo_progreso)
+        if (estado_progreso.get(nombre_segmento) or {}).get("completo"):
+            print(f"Segmento '{nombre_segmento}' ya quedó completo en el progreso. Lo salteo.")
+            return
+        reanudar_en = pagina_de_reanudacion(archivo_progreso, nombre_segmento)
+        if reanudar_en is not None:
+            pagina_inicio = reanudar_en
+            print(f"Reanudo el segmento '{nombre_segmento}' desde la página {pagina_inicio}.")
 
     session = requests.Session()
     session.headers.update(HEADERS)
 
     pagina = pagina_inicio
     total_nuevos = 0
+    ultima_pagina_ok = pagina - 1
     paginas_vacias_seguidas = 0
     paginas_sin_features_seguidas = 0
+    reintentos_202_actual = 0
+    pausas_largas = 0
+    segmento_completo = False
 
     while True:
         if max_paginas is not None and (pagina - pagina_inicio) >= max_paginas:
             print(f"Llegué al límite de {max_paginas} páginas. Corto acá.")
+            segmento_completo = True
             break
 
-        url = construir_url_pagina(pagina)
+        url = construir_url_pagina(pagina, base_url)
         try:
             resp = session.get(url, timeout=20)
         except requests.RequestException as e:
@@ -309,11 +470,64 @@ def scrapear(
 
         if resp.status_code == 404:
             print(f"Página {pagina} devolvió 404: asumo que llegué al final del listado.")
+            segmento_completo = True
             break
-        if resp.status_code != 200:
-            print(f"Página {pagina}: status {resp.status_code}. Reintento en 15s...")
-            time.sleep(15)
+
+        if resp.status_code == STATUS_BLOQUEO:
+            if pagina >= MAX_PAGINAS_SERVICIO:
+                print(
+                    f"Página {pagina}: el sitio corta la paginación en "
+                    f"{MAX_PAGINAS_SERVICIO} páginas (HTTP 202 vacío). "
+                    "Fin del segmento."
+                )
+                segmento_completo = True
+                break
+            reintentos_202_actual += 1
+            if reintentos_202_actual <= reintentos_202:
+                espera = min(backoff_202_inicial * (2 ** (reintentos_202_actual - 1)), 120)
+                print(
+                    f"Página {pagina}: el sitio bloqueó el request (HTTP 202). "
+                    f"Reintento {reintentos_202_actual}/{reintentos_202} "
+                    f"en {espera:.0f}s..."
+                )
+                time.sleep(espera)
+                continue
+            # Bloqueo sostenido: pausa larga y una nueva tanda de reintentos.
+            reintentos_202_actual = 0
+            pausas_largas += 1
+            if pausas_largas > 2:
+                print(
+                    f"Página {pagina}: bloqueo persistente del sitio tras "
+                    f"{pausas_largas} pausas largas. Guardo el progreso y corto "
+                    "el segmento; se reanuda con el mismo comando."
+                )
+                segmento_completo = False
+                break
+            print(
+                f"Página {pagina}: bloqueo sostenido del sitio. "
+                f"Pausa larga de {pausa_bloqueo:.0f}s antes de reintentar..."
+            )
+            time.sleep(pausa_bloqueo)
             continue
+
+        if resp.status_code != 200:
+            # Otros errores (500, 429, etc.): reintento acotado también, con
+            # el mismo backoff, para no quedar en loop infinito.
+            reintentos_202_actual += 1
+            if reintentos_202_actual <= reintentos_202:
+                espera = min(backoff_202_inicial * (2 ** (reintentos_202_actual - 1)), 120)
+                print(
+                    f"Página {pagina}: status {resp.status_code}. "
+                    f"Reintento {reintentos_202_actual}/{reintentos_202} "
+                    f"en {espera:.0f}s..."
+                )
+                time.sleep(espera)
+                continue
+            print(f"Página {pagina}: status {resp.status_code} persistente. Corto el segmento.")
+            segmento_completo = False
+            break
+
+        reintentos_202_actual = 0
 
         if html_debug:
             with open(html_debug, "w", encoding="utf-8") as f:
@@ -327,6 +541,7 @@ def scrapear(
             print(f"Página {pagina}: sin avisos.")
             if paginas_vacias_seguidas >= 2:
                 print("Dos páginas vacías seguidas: termino el scraping.")
+                segmento_completo = True
                 break
             pagina += 1
             time.sleep(random.uniform(delay_min, delay_max))
@@ -370,7 +585,27 @@ def scrapear(
             f"Página {pagina}: {len(listings)} avisos encontrados, {len(filas_pagina)} nuevos guardados. Total nuevos: {total_nuevos}"
         )
 
+        ultima_pagina_ok = pagina
         pagina += 1
         time.sleep(random.uniform(delay_min, delay_max))
+
+        if archivo_progreso:
+            estado_progreso[nombre_segmento] = {
+                "pagina": ultima_pagina_ok,
+                "completo": False,
+            }
+            guardar_progreso(archivo_progreso, estado_progreso)
+
+    if archivo_progreso:
+        estado_progreso[nombre_segmento] = {
+            "pagina": ultima_pagina_ok,
+            "completo": segmento_completo,
+        }
+        guardar_progreso(archivo_progreso, estado_progreso)
+        estado = "completo" if segmento_completo else "incompleto"
+        print(
+            f"Progreso del segmento '{nombre_segmento}' guardado en "
+            f"'{archivo_progreso}' ({estado}, hasta página {ultima_pagina_ok})."
+        )
 
     print(f"\nListo. Se agregaron {total_nuevos} avisos nuevos a '{output_path}'.")

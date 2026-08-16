@@ -12,19 +12,27 @@ import csv
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 from bs4 import BeautifulSoup
 
 from real_estate.ingestion.scraper import (
     BASE_URL,
     COLUMNS,
+    MAX_PAGINAS_SERVICIO,
+    STATUS_BLOQUEO,
     asegurar_encabezado,
     cargar_ids_existentes,
+    cargar_progreso,
     construir_url_pagina,
+    construir_url_segmento,
     detectar_tipo_propiedad,
     extraer_ambientes_de_url,
     extraer_features_de_tarjeta,
     guardar_filas,
+    guardar_progreso,
+    pagina_de_reanudacion,
     parsear_listing,
+    scrapear,
 )
 
 HTML_TARJETA_COMPLETA = """
@@ -228,3 +236,290 @@ class TestHelpersCsv:
         guardar_filas(str(ruta), [{"id": "2", "titulo": "B"}])
 
         assert cargar_ids_existentes(str(ruta)) == {"1", "2"}
+
+
+class TestConstruirUrlSegmento:
+    def test_sin_filtros_usa_la_base(self) -> None:
+        assert construir_url_segmento() == BASE_URL
+
+    def test_con_tipo(self) -> None:
+        url = construir_url_segmento(tipo="departamentos")
+        assert url == "https://www.argenprop.com/inmuebles/departamentos-en-venta/capital-federal"
+
+    def test_con_barrio(self) -> None:
+        assert construir_url_segmento(barrio="palermo") == f"{BASE_URL}/palermo"
+
+    def test_tipo_y_barrio(self) -> None:
+        url = construir_url_segmento(tipo="casas", barrio="palermo")
+        assert url == "https://www.argenprop.com/inmuebles/casas-en-venta/capital-federal/palermo"
+
+
+class TestConstruirUrlPaginaConSegmento:
+    def test_pagina_uno_es_la_base_del_segmento(self) -> None:
+        assert construir_url_pagina(1, base_url="https://x/segmento") == "https://x/segmento"
+
+    def test_pagina_mayor_agrega_query_al_segmento(self) -> None:
+        assert (
+            construir_url_pagina(3, base_url="https://x/segmento") == "https://x/segmento?pagina-3"
+        )
+
+
+class TestProgreso:
+    def test_guardar_y_cargar(self, tmp_path: Path) -> None:
+        ruta = tmp_path / "progreso.json"
+        estado = {"palermo": {"pagina": 42, "completo": False}}
+        guardar_progreso(str(ruta), estado)
+        assert cargar_progreso(str(ruta)) == estado
+
+    def test_cargar_sin_archivo(self) -> None:
+        assert cargar_progreso("no-existe.json") == {}
+
+    def test_cargar_corrupto(self, tmp_path: Path) -> None:
+        ruta = tmp_path / "progreso.json"
+        ruta.write_text("{json roto", encoding="utf-8")
+        assert cargar_progreso(str(ruta)) == {}
+
+    def test_guardar_crea_el_directorio(self, tmp_path: Path) -> None:
+        ruta = tmp_path / "anidado" / "progreso.json"
+        guardar_progreso(str(ruta), {"x": {"pagina": 1, "completo": True}})
+        assert cargar_progreso(str(ruta)) == {"x": {"pagina": 1, "completo": True}}
+
+    def test_pagina_de_reanudacion_sin_progreso(self) -> None:
+        assert pagina_de_reanudacion("no-existe.json", "palermo") is None
+
+    def test_pagina_de_reanudacion_completo(self, tmp_path: Path) -> None:
+        ruta = tmp_path / "progreso.json"
+        guardar_progreso(str(ruta), {"palermo": {"pagina": 99, "completo": True}})
+        assert pagina_de_reanudacion(str(ruta), "palermo") is None
+
+    def test_pagina_de_reanudacion_parcial(self, tmp_path: Path) -> None:
+        ruta = tmp_path / "progreso.json"
+        guardar_progreso(str(ruta), {"palermo": {"pagina": 42, "completo": False}})
+        assert pagina_de_reanudacion(str(ruta), "palermo") == 43
+
+
+# ---------------------------------------------------------------------------
+# Helpers para simular el sitio en los tests de scrapear()
+# ---------------------------------------------------------------------------
+
+
+class FakeRespuesta:
+    def __init__(self, status_code: int, text: str = "") -> None:
+        self.status_code = status_code
+        self.text = text
+
+
+class FakeSesion:
+    """Sesión fake: entrega las respuestas en cola y, si se agota, repite la
+    última (como un servidor que sigue bloqueando)."""
+
+    def __init__(self, respuestas: list[FakeRespuesta]) -> None:
+        self.respuestas = list(respuestas)
+        self.ultima = respuestas[-1] if respuestas else FakeRespuesta(404)
+        self.headers: dict[str, str] = {}
+        self.calls = 0
+
+    def get(self, url: str, timeout: int | None = None) -> FakeRespuesta:
+        self.calls += 1
+        if self.respuestas:
+            self.ultima = self.respuestas.pop(0)
+        return self.ultima
+
+
+def html_de_una_pagina(n_avisos: int, id_inicial: int = 1000) -> str:
+    """HTML de listado con `n_avisos` tarjetas, ids únicos consecutivos."""
+    tarjeta = """
+    <div class="listing__item">
+      <a data-item-card="{id}" montooperacion="250000" montonormalizado="250000"
+         idmoneda="2" dormitorios="2" idtipopropiedad="1"
+         href="/departamento-en-venta-en-palermo-3-ambientes--{id}">
+         <div class="card__title--primary">Departamento en Venta en Palermo Chico, Palermo</div>
+         <div class="card__currency">USD</div>
+         <ul class="card__main-features">
+           <li><i class="basico1-icon-cantidad_dormitorios"></i><span>2</span></li>
+           <li><i class="basico1-icon-superficie_cubierta"></i><span>90 m2 cubie.</span></li>
+         </ul>
+      </a>
+    </div>
+    """
+    return "\n".join(tarjeta.format(id=id_inicial + i) for i in range(n_avisos))
+
+
+def configurar_fake(monkeypatch: pytest.MonkeyPatch, sesion: FakeSesion) -> None:
+    """Parchea Session, sleeps y delays para que scrapear() corra sin red."""
+    # Forma con string: parchea el módulo global, que es el que usa el scraper.
+    monkeypatch.setattr("requests.Session", lambda: sesion)
+    monkeypatch.setattr("time.sleep", lambda _s: None)
+    monkeypatch.setattr("random.uniform", lambda _a, _b: 0.0)
+
+
+class TestScrapearCon202:
+    def test_202_en_pagina_100_corta_el_segmento_como_completo(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        csv_path = tmp_path / "datos.csv"
+        prog_path = tmp_path / "progreso.json"
+        respuestas = [FakeRespuesta(200, html_de_una_pagina(1, 1000 + i)) for i in range(99)]
+        respuestas.append(FakeRespuesta(STATUS_BLOQUEO, ""))
+        sesion = FakeSesion(respuestas)
+        configurar_fake(monkeypatch, sesion)
+
+        scrapear(
+            str(csv_path),
+            max_paginas=None,
+            pagina_inicio=1,
+            delay_min=0.0,
+            delay_max=0.0,
+            base_url=construir_url_segmento(barrio="palermo"),
+            nombre_segmento="palermo",
+            archivo_progreso=str(prog_path),
+        )
+
+        # 99 páginas OK (pagina 100 devuelve 202 = cap del sitio)
+        assert len(cargar_ids_existentes(str(csv_path))) == 99
+        assert sesion.calls == 100
+        estado = cargar_progreso(str(prog_path))
+        assert estado["palermo"]["completo"] is True
+        assert estado["palermo"]["pagina"] == 99
+
+    def test_202_en_pagina_temprana_reintenta_y_avanza(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        csv_path = tmp_path / "datos.csv"
+        prog_path = tmp_path / "progreso.json"
+        # pagina 1 OK, pagina 2 primero 202 y después 200, paginas 3 y 4 OK
+        respuestas = [
+            FakeRespuesta(200, html_de_una_pagina(1, 1000)),
+            FakeRespuesta(STATUS_BLOQUEO, ""),
+            FakeRespuesta(200, html_de_una_pagina(1, 1001)),
+            FakeRespuesta(200, html_de_una_pagina(1, 1002)),
+            FakeRespuesta(200, html_de_una_pagina(1, 1003)),
+        ]
+        sesion = FakeSesion(respuestas)
+        configurar_fake(monkeypatch, sesion)
+
+        scrapear(
+            str(csv_path),
+            max_paginas=4,
+            pagina_inicio=1,
+            delay_min=0.0,
+            delay_max=0.0,
+            nombre_segmento="palermo",
+            archivo_progreso=str(prog_path),
+        )
+
+        # 4 páginas procesadas; el 202 en la página 2 requirió un request extra
+        assert len(cargar_ids_existentes(str(csv_path))) == 4
+        assert sesion.calls == 5
+        assert cargar_progreso(str(prog_path))["palermo"]["completo"] is True
+
+    def test_bloqueo_sostenido_deja_el_segmento_incompleto(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        csv_path = tmp_path / "datos.csv"
+        prog_path = tmp_path / "progreso.json"
+        # pagina 1 OK; el resto queda bloqueado (202) de forma persistente
+        respuestas = [FakeRespuesta(200, html_de_una_pagina(1, 1000))]
+        respuestas.append(FakeRespuesta(STATUS_BLOQUEO, ""))
+        sesion = FakeSesion(respuestas)
+        configurar_fake(monkeypatch, sesion)
+
+        scrapear(
+            str(csv_path),
+            max_paginas=None,
+            pagina_inicio=1,
+            delay_min=0.0,
+            delay_max=0.0,
+            nombre_segmento="palermo",
+            archivo_progreso=str(prog_path),
+            reintentos_202=2,
+        )
+
+        # Se guardó la página 1 pero el segmento quedó incompleto para reanudar
+        assert len(cargar_ids_existentes(str(csv_path))) == 1
+        estado = cargar_progreso(str(prog_path))["palermo"]
+        assert estado["completo"] is False
+        assert estado["pagina"] == 1
+        # Reanudar retomaría desde la página 2
+        assert pagina_de_reanudacion(str(prog_path), "palermo") == 2
+
+    def test_segmento_completo_en_progreso_se_salteca(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        csv_path = tmp_path / "datos.csv"
+        prog_path = tmp_path / "progreso.json"
+        guardar_progreso(str(prog_path), {"palermo": {"pagina": 99, "completo": True}})
+        sesion = FakeSesion([FakeRespuesta(200, html_de_una_pagina(1, 1000))])
+        configurar_fake(monkeypatch, sesion)
+
+        scrapear(
+            str(csv_path),
+            max_paginas=None,
+            pagina_inicio=1,
+            delay_min=0.0,
+            delay_max=0.0,
+            nombre_segmento="palermo",
+            archivo_progreso=str(prog_path),
+        )
+
+        assert sesion.calls == 0
+        assert cargar_ids_existentes(str(csv_path)) == set()
+
+    def test_reanuda_desde_la_ultima_pagina_guardada(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        csv_path = tmp_path / "datos.csv"
+        prog_path = tmp_path / "progreso.json"
+        guardar_progreso(str(prog_path), {"palermo": {"pagina": 1, "completo": False}})
+        # página 2 OK (id 2000), página 3 bloqueada para cortar la corrida
+        sesion = FakeSesion(
+            [
+                FakeRespuesta(200, html_de_una_pagina(1, 2000)),
+                FakeRespuesta(STATUS_BLOQUEO, ""),
+            ]
+        )
+        configurar_fake(monkeypatch, sesion)
+
+        scrapear(
+            str(csv_path),
+            max_paginas=None,
+            pagina_inicio=1,
+            delay_min=0.0,
+            delay_max=0.0,
+            nombre_segmento="palermo",
+            archivo_progreso=str(prog_path),
+            reintentos_202=1,
+        )
+
+        # Reanudó en la página 2 (no volvió a pedir la 1)
+        assert len(cargar_ids_existentes(str(csv_path))) == 1
+        assert sesion.calls >= 2
+        estado = cargar_progreso(str(prog_path))["palermo"]
+        assert estado["completo"] is False
+        assert estado["pagina"] == 2
+
+    def test_cap_202_respetado_sin_importar_reintentos(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Aunque el 202 en la página 100 es el cap del servidor, no se reintenta."""
+        csv_path = tmp_path / "datos.csv"
+        prog_path = tmp_path / "progreso.json"
+        respuestas = [FakeRespuesta(200, html_de_una_pagina(1, 1000 + i)) for i in range(99)]
+        respuestas.append(FakeRespuesta(STATUS_BLOQUEO, ""))
+        sesion = FakeSesion(respuestas)
+        configurar_fake(monkeypatch, sesion)
+
+        scrapear(
+            str(csv_path),
+            max_paginas=None,
+            pagina_inicio=1,
+            delay_min=0.0,
+            delay_max=0.0,
+            nombre_segmento="global",
+            archivo_progreso=str(prog_path),
+            reintentos_202=10,
+        )
+
+        # Un solo request a la página 100: el cap se detecta sin reintentar
+        assert sesion.calls == MAX_PAGINAS_SERVICIO
+        assert cargar_progreso(str(prog_path))["global"]["completo"] is True
