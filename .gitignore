@@ -23,6 +23,7 @@ ENV/
 .ruff_cache/
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 
 # ============================================================
