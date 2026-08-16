@@ -216,7 +216,14 @@ el número crece con cada corrida incremental).
                                               │
                                               ▼
                                       ┌───────────────┐
-                                      │     Docker    │
+                                      │Serving bundle │
+                                      │  (fase 10)    │
+                                      └──────┬────────┘
+                                             │
+                                             ▼
+                                      ┌───────────────┐
+                                      │  FastAPI API  │
+                                      │  (fase 10)    │
                                       └───────────────┘
 ```
 
@@ -252,7 +259,11 @@ MLflow
 Best Model
     ├──────────────→ SHAP
     │
-    └──────────────→ Docker / Deployment
+    └──────────────→ Serving bundle (models/, fase 10)
+            ↓
+    FastAPI API (/health, /predict)
+            ↓
+    make serve (uvicorn)
 ```
 
 ---
@@ -323,6 +334,7 @@ Validar que los datos tengan sentido y detectar anomalías:
 | Git hooks | pre-commit | Gates antes del commit | ✔ dependencia dev |
 | CI/CD | GitHub Actions | Integración continua | ✔ `.github/workflows/ci.yml` |
 | Containerization | Docker, Docker Compose | Contenedores | ✘ pendiente |
+| API / Serving | FastAPI, Uvicorn | API de predicción (fase 10) | ✔ dependencia |
 | Configuración | Pydantic Settings, python-dotenv | Configuración y env vars | ✔ dependencia |
 | Jupyter | Jupyter, IPython kernel | Notebooks de análisis | ✔ dependencia dev |
 
@@ -394,20 +406,28 @@ real-estate-price-prediction/
 │       │                             error por segmento, sesgo por rango)
 │       ├── tracking/              ✔ experimentos.py (MLflow: params, métricas,
 │       │                             artefactos, Model Registry)
+│       ├── serving/               ✔ fase 10: modelo.py (ModeloPrediccion),
+│       │                             persistencia.py (guardar/cargar bundle)
+│       ├── api/                   ✔ fase 10: app.py (FastAPI, /health + /predict),
+│       │                             schemas.py, config.py
 │       └── utils/                 🏗 vacío
 │
 ├── scripts/
 │   ├── scrape.py                   ✔ (entry point de adquisición)
 │   ├── curate.py                   ✔ (entry point de curación)
 │   ├── features.py                 ✔ (entry point de feature engineering)
-│   └── train.py                    ✔ (entry point de modelado + tracking MLflow)
+│   ├── train.py                    ✔ (entry point de modelado + tracking MLflow)
+│   └── exportar_modelo.py          ✔ fase 10 (entry point de exportación del bundle de serving)
 │   (se planifican evaluate/explain)
 │
 ├── tests/
-│   ├── unit/                       ✔ (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion)
-│   └── integration/                ✔ (pipeline de curación)
+│   ├── unit/                       ✔ (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion, serving)
+│   └── integration/                ✔ (pipeline de curación, API FastAPI)
 │
-├── models/                         🏗 vacía
+├── models/
+│   └── modelo_precio_propiedades/  ✔ fase 10: bundle de serving (modelo, preprocesamiento,
+│                                       features, metadata; gitignored, se regenera con
+│                                       `make export-model`)
 │
 ├── reports/
 │   ├── figures/                    ✔ en uso (figuras SHAP fase 7 y de evaluación fase 8; gitignored)
@@ -442,8 +462,8 @@ real-estate-price-prediction/
 | **Responsabilidades** | Metadata del proyecto, versión de Python, dependencias prod/dev, package discovery, config de Pytest, Ruff, Mypy y coverage |
 | **Build** | setuptools (`setuptools>=75`), layout `src/` (`[tool.setuptools.packages.find] where=["src"]`) |
 | **Python** | `>=3.11,<3.14` |
-| **Dependencias prod** | numpy, pandas, requests, beautifulsoup4, lxml, scikit-learn, xgboost, mlflow, shap, pydantic-settings, python-dotenv |
-| **Dependencias dev** | pytest, pytest-cov, ruff, mypy, pandas-stubs, pre-commit, jupyter, ipykernel, matplotlib |
+| **Dependencias prod** | numpy, pandas, requests, beautifulsoup4, lxml, scikit-learn, xgboost, mlflow, shap, fastapi, uvicorn, pydantic-settings, python-dotenv |
+| **Dependencias dev** | pytest, pytest-cov, httpx, ruff, mypy, pandas-stubs, pre-commit, jupyter, ipykernel, matplotlib |
 | **Pytest** | `testpaths=["tests"]`, `pythonpath=["src"]`, addopts `-ra --strict-markers --strict-config` |
 | **Ruff** | `line-length=100`, target `py311`, reglas `E W F I B UP N SIM` (ignora `E501`), formatter: comillas dobles, espacios |
 | **Mypy** | `strict=true`, `python_version=3.12`, files `["src","tests"]`, varias advertencias estrictas |
@@ -458,7 +478,7 @@ real-estate-price-prediction/
 |---|---|
 | **Propósito** | Interfaz estándar para ejecutar tareas del proyecto |
 | **Responsabilidades** | Envolver comandos de instalación, calidad, testing y limpieza |
-| **Targets actuales** | `install`, `install-dev`, `scrape`, `curate`, `features`, `train`, `dvc-repro`, `dvc-push`, `dvc-pull`, `dvc-status`, `format`, `lint`, `typecheck`, `test`, `coverage`, `check`, `clean` (además de `help`) |
+| **Targets actuales** | `install`, `install-dev`, `scrape`, `curate`, `features`, `train`, `export-model`, `serve`, `dvc-repro`, `dvc-push`, `dvc-pull`, `dvc-status`, `format`, `lint`, `typecheck`, `test`, `coverage`, `check`, `clean` (además de `help`) |
 | **Targets futuros** | `evaluate`, `explain`, `docker-...` — solo cuando los componentes existan realmente |
 | **Dependencias** | `pyproject.toml` (comandos pip/pytest/ruff/mypy) |
 | **Usado por** | Desarrolladores, CI (futuro) |
@@ -479,7 +499,7 @@ real-estate-price-prediction/
 | Atributo | Valor |
 |---|---|
 | **Propósito** | Documentar las variables de entorno requeridas |
-| **Variables** | `APP_ENV`, `LOG_LEVEL`, `DATA_DIR`, `MLFLOW_TRACKING_URI`, `SCRAPER_REQUEST_TIMEOUT`, `SCRAPER_DELAY_SECONDS` |
+| **Variables** | `APP_ENV`, `LOG_LEVEL`, `DATA_DIR`, `MLFLOW_TRACKING_URI`, `SCRAPER_REQUEST_TIMEOUT`, `SCRAPER_DELAY_SECONDS`, `MODELO_DIR` (fase 10) |
 | **Usado por** | pydantic-settings / python-dotenv (config del proyecto) |
 
 #### Otros archivos de configuración
@@ -735,12 +755,14 @@ subestima las altas (-15.8 % por encima de $235.000). Figuras
 | `curate.py` | ✔ implementado | Orquestar la curación (usa `src/real_estate/curation`) |
 | `features.py` | ✔ implementado | Orquestar el feature engineering (usa `src/real_estate/features`) |
 | `train.py` | ✔ implementado | Orquestar el entrenamiento + tracking MLflow (usa `src/real_estate/models` y `src/real_estate/tracking`; CLI `--input`, `--random-state` y `--no-tracking`) |
+| `exportar_modelo.py` | ✔ implementado (fase 10) | Entrenar sobre el curado y exportar el bundle de serving a `models/modelo_precio_propiedades/` (usa `src/real_estate/serving`; CLI `--input`, `--output`, `--random-state`) |
 | `evaluate.py` | ✘ pendiente | Evaluación de modelos |
 | `explain.py` | ✘ pendiente | Explicabilidad (SHAP) |
 
-**Relación con MakeFile:** `make scrape`, `make curate`, `make features` y
-`make train` ya existen (aceptan `ARGS="..."`). A medida que existan los
-demás scripts, se agregan targets `make evaluate`, `make explain`.
+**Relación con MakeFile:** `make scrape`, `make curate`, `make features`,
+`make train`, `make export-model` y `make serve` ya existen (aceptan
+`ARGS="..."`). A medida que existan los demás scripts, se agregan targets
+`make evaluate`, `make explain`.
 
 ### 9.6 `notebooks/` (01..06 ✔)
 
@@ -768,7 +790,9 @@ Nota: los notebooks se ejecutan headless con
 | `tests/unit/test_tracking.py` | `configurar_tracking` (crea experimento en store local, respeta env `MLFLOW_TRACKING_URI`), `registrar_resultado` (devuelve run_id + versión y cierra la corrida; loguea params, métricas, artefacto `resumen_entrenamiento.json`; modelo con firma en el Model Registry), versionado v1/v2 y `finalizar_corrida` — 7 tests | ✔ |
 | `tests/unit/test_explainability.py` | `calcular_shap` (forma, base finita, nombres; propiedad aditiva base + Σ ≈ predicción), `importancia_global` (todas las features, no negativa, descendente), `grafico_resumen`/`grafico_barras` (devuelven `Figure` con ejes), `guardar_figuras` (escribe PNG no vacíos) — 5 tests | ✔ |
 | `tests/unit/test_evaluacion.py` | `metricas_detalladas` (predicción perfecta → errores 0 y R² 1; consistencia con `calcular_metricas`), `tabla_residuos` (columnas, relaciones internas, exactitud), `resumen_errores` (claves, coherencia con la tabla, sesgo cero), `metricas_por_segmento` (n por grupo, NaN aparte), `bias_por_rango_precio` (bandas balanceadas y ordenadas), gráficos (devuelven `Figure`, PNG no vacíos) — 14 tests | ✔ |
+| `tests/unit/test_serving.py` | Fase 10: round-trip `guardar_bundle`/`cargar_bundle` (archivos escritos, `preprocesamiento.json` válido), `ModeloPrediccion` (USD = `exp(log)`, equivale al pipeline de entrenamiento, invariante al reorden de columnas, categoría desconocida → `CODIGO_DESCONOCIDO`, NaN imputado con la mediana del bundle) — 9 tests | ✔ |
 | `tests/integration/test_pipeline.py` | `curar_csv` end-to-end sobre CSV sintético (columnas del scraper), con tipo de cambio mockeado: conversión USD/ARS, indicadores `*_informado`, conversión de tipos textuales, `FileNotFoundError` | ✔ |
+| `tests/integration/test_api.py` | Fase 10: `/health` (200, estado/modelo/versión/métricas del bundle), `/predict` (precio razonable y finito, `log` consistente, estable ante reorden del payload, indicadores `*_informado` derivados, imputación de faltantes, categoría desconocida, 422 con campos faltantes / indicador fuera de rango / valor negativo), arranque falla sin bundle — 11 tests | ✔ |
 
 Nota: las funciones de `transformations` que tocan la red se prueban con el
 módulo `requests` mockeado; ningún test hace requests reales.
@@ -809,12 +833,59 @@ por defecto a uno en la nube (S3, GCS, DAGsHub o Google Drive), p. ej.:
 `dvc remote add -d storage s3://bucket/real-estate-dvc`. El remote local
 `dvcstore/` queda como default para que el flujo funcione out-of-the-box.
 
-### 9.10 Docker (pendiente)
+### 9.10 Serving + API FastAPI (Fase 10)
+
+El modelo se expone como servicio de predicción HTTP. El flujo es:
+`make export-model` genera el **bundle de serving** en `models/modelo_precio_propiedades/`
+(modelo + preprocesamiento + orden de features + metadata) y `make serve` levanta
+la API FastAPI que lo carga al arrancar y predice sobre nuevas propiedades.
+
+**Bundle de serving** (`models/modelo_precio_propiedades/`, gitignored):
+
+| Archivo | Contenido |
+|---|---|
+| `modelo_xgboost.json` | XGBoost guardado con `save_model` nativo (formato JSON de XGBoost) |
+| `preprocesamiento.json` | `Preprocesamiento` aprendido sobre train: ordenes ordinales por categoría (`barrio`, `tipo_propiedad`) + imputador por mediana |
+| `features.json` | Orden exacto de las 14 features que espera el modelo |
+| `metadata.json` | Métricas en test (RMSE log, R²), tamaños de split y fecha de exportación |
+
+> **Por qué bundle propio y no el Model Registry de MLflow:** MLflow loguea solo
+> el XGBoost (sin firma de preprocesamiento); el `Preprocesamiento` (codificación
+> ordinal + imputación) no se persiste por MLflow, así que el serving usa un
+> bundle a medida generado por `guardar_bundle`.
+
+**Componentes:**
+
+| Ruta | Propósito |
+|---|---|
+| `src/real_estate/serving/persistencia.py` | `guardar_bundle` / `cargar_bundle` (round-trip del bundle a disco) |
+| `src/real_estate/serving/modelo.py` | `ModeloPrediccion` (dataclass): `_construir_matriz` replica el pipeline de entrenamiento (`seleccionar_columnas` → `aplicar_preprocesamiento` → reorden por `columnas_features`), `predecir_log` / `predecir_usd` |
+| `scripts/exportar_modelo.py` | Entrena sobre `data/processed/propiedades_argenprop_curado.csv`, arma el bundle y escribe `resumen_bundle.json` |
+| `src/real_estate/api/config.py` | `ConfiguracionServicio` (pydantic-settings; `modelo_dir` desde env `MODELO_DIR`, default `models/modelo_precio_propiedades`) |
+| `src/real_estate/api/schemas.py` | `PropiedadEntrada` (tipo, barrio, 6 numéricas opcionales con `ge=0`, 6 indicadores `_informado` opcionales 0/1; `None` en un indicador = derivar del valor), `PrediccionSalida` |
+| `src/real_estate/api/app.py` | `crear_app(config)` con lifespan que carga el bundle (falla con `RuntimeError` si no existe); `GET /health` (estado, modelo, versión, métricas), `POST /predict` (devuelve `precio_usd` y `log_precio_usd`); módulo `app` para uvicorn |
+
+**Contrato de entrada del modelo:** 14 features — 6 numéricas imputables
+(`superficie_cubierta`, `ambientes`, `dormitorios`, `banos`, `antiguedad`,
+`expensas_usd`), 6 indicadores `*_informado` y 2 ordinales (`barrio_ordinal`,
+`tipo_propiedad_ordinal`; categoría desconocida → `CODIGO_DESCONOCIDO = -1`).
+
+**Uso:**
+
+```bash
+make export-model    # genera models/modelo_precio_propiedades/
+make serve           # uvicorn real_estate.api.app:app --reload
+```
+
+Resultado sobre el dataset real (fase 10): split 1.599 train / 200 val / 200
+test, RMSE log 0.304, R² 0.783 en test; `/predict` devuelve precios en USD.
+
+### 9.11 Docker (pendiente)
 
 `Dockerfile` + `docker-compose.yml` para contenerizar el proyecto / el servicio
-de predicción (deployment).
+de predicción (deployment). Fuera de alcance por ahora (fase 11 cerrada).
 
-### 9.11 CI/CD
+### 9.12 CI/CD
 
 `ci.yml` (`.github/workflows/ci.yml`): ejecuta Ruff (check + formato), Mypy y
 Pytest con cobertura en GitHub Actions. Un job de calidad (Python 3.12) y un
@@ -828,7 +899,7 @@ existe en CI), el job igualmente termina en éxito con un aviso, porque la
 validación real es de la definición del pipeline. Se dispara en push/PR a
 `main` y manualmente (`workflow_dispatch`).
 
-### 9.12 Datos
+### 9.13 Datos
 
 | Ruta | Contenido | Estado |
 |---|---|---|
@@ -838,11 +909,11 @@ validación real es de la definición del pipeline. Se dispara en push/PR a
 | `data/processed/propiedades_argenprop_features.csv` | Matriz de features, 1.999 filas × 16 columnas, 0 faltantes (lista para modelar) | ✔ |
 | `data/external/` | Datos externos (p. ej., tipo de cambio) | 🏗 vacía |
 
-### 9.13 Otros directorios
+### 9.14 Otros directorios
 
 | Ruta | Estado | Nota |
 |---|---|---|
-| `models/` | 🏗 vacía | Artefactos de modelos (futuro) |
+| `models/` | ✔ en uso (fase 10) | Bundle de serving `modelo_precio_propiedades/` (gitignored; se regenera con `make export-model`) |
 | `reports/figures/` | ✔ en uso | Figuras SHAP del notebook 05 (gitignored; se regeneran con el notebook) |
 | `reports/metrics/` | 🏗 vacía | Métricas de evaluación |
 | `mlruns/` | ✔ en uso | Store local de MLflow (experimentos, corridas y repositorio de modelos; gitignored) |
@@ -881,9 +952,10 @@ validación real es de la definición del pipeline. Se dispara en push/PR a
 - [x] SHAP analysis (`src/real_estate/explainability`, notebook 05)
 - [x] Model evaluation (`src/real_estate/evaluacion`, notebook 06)
 - [x] GitHub Actions (`ci.yml` + `dvc.yml`)
-- [ ] Dockerfile
-- [ ] docker-compose
-- [ ] Deployment / API
+- [x] Serving bundle (`src/real_estate/serving` + `scripts/exportar_modelo.py`, bundle en `models/modelo_precio_propiedades/`)
+- [x] API de predicción FastAPI (`src/real_estate/api`, `/health` + `/predict`, `make serve`)
+- [ ] Dockerfile (fase 11, fuera de alcance)
+- [ ] docker-compose (fase 11, fuera de alcance)
 
 ---
 
@@ -954,7 +1026,14 @@ notebooks/06_model_evaluation.ipynb ──→ src/real_estate/evaluacion/analisi
         ↓
 reports/figures/ (shap_*.png, evaluacion_*.png)
         ↓
-Docker / Deployment
+scripts/exportar_modelo.py ──→ src/real_estate/serving/  (bundle de serving, fase 10)
+        ↓
+models/modelo_precio_propiedades/ (modelo + preprocesamiento + features + metadata)
+        ↓
+src/real_estate/api/app.py ──→ src/real_estate/api/schemas.py
+                               (FastAPI: /health + /predict, fase 10)
+        ↓
+make serve (uvicorn real_estate.api.app:app)
 ```
 
 ### Dependencias de software (ejemplo)
@@ -973,6 +1052,9 @@ curate.py ──→ src/real_estate/curation ──→ pandas / numpy / pydantic
 features.py ──→ src/real_estate/features ──→ scikit-learn / numpy / pandas
 train.py  ──→ src/real_estate/models ──→ scikit-learn / xgboost
              └──→ src/real_estate/tracking ──→ mlflow
+exportar_modelo.py ──→ src/real_estate/serving ──→ xgboost / pandas / numpy
+api/app.py ──→ src/real_estate/api ──→ fastapi / uvicorn / pydantic-settings
+             └──→ src/real_estate/serving ──→ xgboost / pandas / numpy
 explain.py ──→ src/real_estate/explainability ──→ shap
 evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplotlib
 ```
@@ -996,13 +1078,15 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `.github/workflows/dvc.yml` | ✔ Implementado: valida etapas (`stage list`), estado (`status`) y `pull` best-effort | ✔ |
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) y `propiedades_argenprop_features.csv` (16 columnas) | ✔ |
-| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion) + integration (pipeline) — 135 tests | ✔ |
+| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion, serving) + integration (pipeline, API FastAPI) — 155 tests | ✔ |
 | `src/real_estate/models` | ✔ Implementado en la fase 5: `entrenamiento.py` (baseline, XGBoost, evaluación sin fuga) | ✔ |
 | `src/real_estate/explainability` | ✔ Implementado en la fase 7: `shap_analysis.py` (valores SHAP, base, importancia global, figuras) | ✔ |
 | `src/real_estate/evaluacion` | ✔ Implementado en la fase 8: `analisis.py` (métricas detalladas, residuos, error por segmento, sesgo por rango, figuras) | ✔ |
+| `src/real_estate/serving` | ✔ Implementado en la fase 10: `modelo.py` (`ModeloPrediccion`) + `persistencia.py` (`guardar_bundle`/`cargar_bundle`) | ✔ |
+| `src/real_estate/api` | ✔ Implementado en la fase 10: `app.py` (FastAPI `/health` + `/predict`), `schemas.py`, `config.py` | ✔ |
 | `notebooks/` | ✔ 01..06 ejecutados (estructura/calidad, precio/características, feature engineering, model analysis, shap analysis, model evaluation) | ✔ |
 | `reports/figures/` | ✔ En uso: figuras SHAP (05) y de evaluación (06) (gitignored) | ✔ |
-| `models/` | Vacía (esqueleto) | Pendiente |
+| `models/` | ✔ Bundle de serving de la fase 10 (`modelo_precio_propiedades/`; gitignored, se regenera con `make export-model`) | ✔ |
 | `mlruns/` | ✔ En uso: store local de MLflow (experimentos, corridas, repositorio de modelos) — gitignored | ✔ |
 | Repositorio Git | ✔ Inicializado en `main`, remoto `origin` apuntando a GitHub (matiasbelsito7/real-estate-price-prediction), commit inicial pusheado | ✔ |
 | `README.md` | ✔ Actualizado: documenta scrape y curate vía `scripts/`; ya no menciona `scraper_argenprop2.py` | ✔ |

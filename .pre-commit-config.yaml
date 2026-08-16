@@ -26,6 +26,12 @@ repos:
           # pytest (con py.typed) para tipar los decoradores
           # @pytest.mark.parametrize y @pytest.fixture de los tests.
           - pytest
+          # Fase 10: fastapi / pydantic / pydantic-settings traen tipos inline
+          # (py.typed); sin ellos BaseModel/BaseSettings/decoradores resuelven
+          # como Any y mypy falla en src/real_estate/api.
+          - fastapi
+          - pydantic
+          - pydantic-settings
 
 
   # ==========================================================

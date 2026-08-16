@@ -1,4 +1,4 @@
-.PHONY: help install install-dev scrape curate features train dvc-repro dvc-push dvc-pull dvc-status format lint typecheck test coverage check clean
+.PHONY: help install install-dev scrape curate features train export-model serve dvc-repro dvc-push dvc-pull dvc-status format lint typecheck test coverage check clean
 
 
 # ============================================================
@@ -25,6 +25,8 @@ help:
 	@echo "  make curate        Run Data Curation (scripts/curate.py)"
 	@echo "  make features      Run Feature Engineering (scripts/features.py)"
 	@echo "  make train         Run Model Training (scripts/train.py)"
+	@echo "  make export-model  Export serving bundle (scripts/exportar_modelo.py)"
+	@echo "  make serve         Run FastAPI prediction service (Fase 10)"
 	@echo ""
 	@echo "  make dvc-repro     Run DVC data pipeline (dvc repro)"
 	@echo "  make dvc-push      Upload data to DVC remote (dvc push)"
@@ -73,6 +75,14 @@ features:
 
 train:
 	$(PYTHON) scripts/train.py $(ARGS)
+
+
+export-model:
+	$(PYTHON) scripts/exportar_modelo.py $(ARGS)
+
+
+serve:
+	uvicorn real_estate.api.app:app --reload
 
 
 # ============================================================
