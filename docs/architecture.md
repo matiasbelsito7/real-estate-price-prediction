@@ -362,13 +362,14 @@ real-estate-price-prediction/
 ├── data/
 │   ├── raw/    propiedades_argenprop.csv   ✔ (2.005 registros)
 │   ├── interim/                             🏗 vacía
-│   ├── processed/ propiedades_argenprop_curado.csv   ✔ (32 columnas)
+│   ├── processed/ propiedades_argenprop_curado.csv    ✔ (32 columnas)
+│   │              propiedades_argenprop_features.csv   ✔ (16 columnas, fase 4)
 │   └── external/                            🏗 vacía
 │
 ├── dvc.yaml                        ✘
 ├── dvc.lock                        ✘
 │
-├── notebooks/                      ✔ 01_eda_estructura_y_calidad, 02_eda_precio_y_caracteristicas (03..05 pendientes)
+├── notebooks/                      ✔ 01_eda_estructura_y_calidad, 02_eda_precio_y_caracteristicas, 03_feature_engineering (04..05 pendientes)
 │
 ├── src/
 │   └── real_estate/
@@ -382,7 +383,10 @@ real-estate-price-prediction/
 │       │   ├── transformations.py  ✔ (moneda → USD, indicadores missing)
 │       │   ├── validation.py       ✔ (reglas de coherencia, solo reporte)
 │       │   └── pipeline.py         ✔ (orquestador curar_dataset)
-│       ├── features/              🏗 vacío
+│       ├── features/
+│       │   ├── __init__.py         ✔
+│       │   ├── transformations.py  ✔ (selección, target log, ordinal, imputación)
+│       │   └── pipeline.py         ✔ (orquestador construir_features + splits)
 │       ├── models/                🏗 vacío
 │       ├── explainability/        🏗 vacío
 │       ├── tracking/              🏗 vacío
@@ -390,12 +394,13 @@ real-estate-price-prediction/
 │
 ├── scripts/
 │   ├── scrape.py                   ✔ (entry point de adquisición)
-│   └── curate.py                   ✔ (entry point de curación)
+│   ├── curate.py                   ✔ (entry point de curación)
+│   └── features.py                 ✔ (entry point de feature engineering)
 │   (se planifican train/evaluate/explain)
 │
 ├── tests/
-│   ├── unit/                       🏗 vacía
-│   └── integration/                🏗 vacía
+│   ├── unit/                       ✔ (cleaning, scraper, transformations, features)
+│   └── integration/                ✔ (pipeline de curación)
 │
 ├── models/                         🏗 vacía
 │
@@ -572,19 +577,35 @@ real-estate-price-prediction/
 | **Usado por** | `make curate` (MakeFile) |
 | **Outputs** | CSV curado en `data/processed/` |
 
-### 9.4 Paquete `src/real_estate/` — subpaquetes pendientes
+### 9.4 Paquete `src/real_estate/` — subpaquetes
 
 Paquete descubrible vía `pyproject.toml` (layout `src/`). Import como
-`real_estate.*`. `ingestion/` y `curation/` ya están implementados (secciones
-9.2 y 9.3). Los siguientes subpaquetes existen pero están vacíos:
+`real_estate.*`. `ingestion/`, `curation/` y `features/` ya están implementados
+(secciones 9.2, 9.3 y 9.4b). Los siguientes subpaquetes existen pero están vacíos:
 
-| Subpaquete | Responsabilidad planificada |
+| Subpaquete | Responsabilidad |
 |---|---|
-| `features/` | Feature engineering (features derivadas, splits train/val/test) |
+| `features/` | ✔ Implementado: selección de columnas, target `log_precio_usd`, codificación ordinal por mediana de precio, imputación por mediana, splits train/val/test (sección 9.4b) |
 | `models/` | Baseline, XGBoost, entrenamiento y evaluación |
 | `explainability/` | SHAP analysis |
 | `tracking/` | Integración con MLflow (experimentos, registry) |
 | `utils/` | Utilidades transversales (config con pydantic-settings, logging, etc.) |
+
+#### 9.4b `features/` (implementado en la fase 4)
+
+| Archivo | Contenido |
+|---|---|
+| `transformations.py` | `COLUMNAS_DESCARTAR`/`IMPUTAR`/`INDICADOR`/`CATEGORICAS`, `PRECIO_MINIMO_USD` (descarta artefactos del scraping, p. ej. precio 1 USD), `seleccionar_columnas`, `crear_target_log`, `crear_orden_mediana`, `codificar_ordinal` (`CODIGO_DESCONOCIDO = -1`), `crear_imputador`, `aplicar_imputacion` |
+| `pipeline.py` | `construir_features` (orquesta las 4 etapas), `dividir_train_val_test` (80/10/10 reproducible vía `random_state`), `mostrar_features` |
+
+Decisiones de diseño (de las conclusiones de EDA 01 y 02):
+- Columnas sin señal descartadas: cobertura < 3 % (+ sus indicadores), `sub_barrio` (88,8 % faltante), texto libre, identificadores y redundancias de moneda.
+- Target `log_precio_usd` (el log es aproximadamente normal); RMSE en log = error relativo.
+- Codificación ordinal de `barrio` (44 categorías) y `tipo_propiedad` (7) por mediana de precio — apta para árboles (modelo planificado).
+- API `crear_*` / `aplicar_*`: los ajustes se aprenden solo sobre train y se reaplican a val/test (sin fuga de información).
+- Filtro de precios: se descartan < `PRECIO_MINIMO_USD` (1.000), incluye 6 filas del real (4 con precio ≤ 0 y 2 artefactos de scraping con precio 1 USD).
+
+Artifactos: `data/processed/propiedades_argenprop_features.csv` (1.999 filas × 16 columnas, 0 faltantes).
 
 ### 9.5 `scripts/`
 
@@ -592,25 +613,26 @@ Paquete descubrible vía `pyproject.toml` (layout `src/`). Import como
 |---|---|---|
 | `scrape.py` | ✔ implementado | Orquestar la adquisición (usa `src/real_estate/ingestion`) |
 | `curate.py` | ✔ implementado | Orquestar la curación (usa `src/real_estate/curation`) |
+| `features.py` | ✔ implementado | Orquestar el feature engineering (usa `src/real_estate/features`) |
 | `train.py` | ✘ pendiente | Orquestar el entrenamiento (usaría `src/real_estate/models` + `tracking`) |
 | `evaluate.py` | ✘ pendiente | Evaluación de modelos |
 | `explain.py` | ✘ pendiente | Explicabilidad (SHAP) |
 
-**Relación con MakeFile:** `make scrape` y `make curate` ya existen (aceptan
-`ARGS="..."`). A medida que existan los demás scripts, se agregan targets
-`make train`, `make evaluate`, `make explain`.
+**Relación con MakeFile:** `make scrape`, `make curate` y `make features` ya
+existen (aceptan `ARGS="..."`). A medida que existan los demás scripts, se
+agregan targets `make train`, `make evaluate`, `make explain`.
 
-### 9.6 `notebooks/` (01/02 ✔, 03-05 pendientes)
+### 9.6 `notebooks/` (01/02/03 ✔, 04-05 pendientes)
 
 | Notebook | Tema | Estado |
 |---|---|---|
 | `01_eda_estructura_y_calidad.ipynb` | Estructura (2005×32), datos faltantes, cobertura, identificadores y cardinalidad | ✔ ejecutado |
 | `02_eda_precio_y_caracteristicas.ipynb` | Distribución del target, outliers, precio vs características, correlaciones | ✔ ejecutado |
-| `03_feature_engineering.ipynb` | Ingeniería de features | Pendiente |
+| `03_feature_engineering.ipynb` | Construcción de la matriz de features (1.999×16), verificación ordinal, split 80/10/10 | ✔ ejecutado |
 | `04_model_analysis.ipynb` | Análisis de modelos | Pendiente |
 | `05_shap_analysis.ipynb` | SHAP / explicabilidad | Pendiente |
 
-Nota: ambos notebooks se ejecutan headless con
+Nota: los notebooks se ejecutan headless con
 `python -m jupyter nbconvert --to notebook --execute --inplace` (backend Agg).
 
 ### 9.7 `tests/`
@@ -620,6 +642,7 @@ Nota: ambos notebooks se ejecutan headless con
 | `tests/unit/test_cleaning.py` | `limpiar_numero` (14 formatos reales de Argenprop), `limpiar_columnas_numericas`, `limpiar_expensas`, `preparar_fecha` | ✔ |
 | `tests/unit/test_scraper.py` | `parsear_listing` (tarjeta completa y mínima, swap Capital Federal, fallback de moneda por `idmoneda`), helpers de URL/tipo/ambientes, ciclo CSV (header/append/ids) | ✔ |
 | `tests/unit/test_transformations.py` | `obtener_tipo_cambio` (mock de `requests`: dict/lista/sin venta/error de red/retroceso de día), `construir_tabla_tipo_cambio`, `normalizar_moneda` (USD/ARS/moneda desconocida/columnas faltantes), `normalizar_expensas`, `crear_indicadores_missing` | ✔ |
+| `tests/unit/test_features.py` | `seleccionar_columnas`, `crear_target_log` (filtro de inválidos y de artefactos < 1.000 USD), `crear_orden_mediana`, `codificar_ordinal`, imputación, `construir_features` end-to-end y `dividir_train_val_test` (tamaños, disjunción, reproducibilidad) — 22 tests | ✔ |
 | `tests/integration/test_pipeline.py` | `curar_csv` end-to-end sobre CSV sintético (columnas del scraper), con tipo de cambio mockeado: conversión USD/ARS, indicadores `*_informado`, conversión de tipos textuales, `FileNotFoundError` | ✔ |
 
 Nota: las funciones de `transformations` que tocan la red se prueban con el
@@ -654,6 +677,7 @@ job de tests con matriz Python 3.11 / 3.12, instalando `pip install -e ".[dev]"`
 | `data/raw/propiedades_argenprop.csv` | Dataset crudo, 2.005 registros, 20 columnas | ✔ |
 | `data/interim/` | Datos intermedios (p. ej., entre curación y features) | 🏗 vacía |
 | `data/processed/propiedades_argenprop_curado.csv` | Dataset curado, 2.005 filas, 32 columnas (listo para EDA/features) | ✔ |
+| `data/processed/propiedades_argenprop_features.csv` | Matriz de features, 1.999 filas × 16 columnas, 0 faltantes (lista para modelar) | ✔ |
 | `data/external/` | Datos externos (p. ej., tipo de cambio) | 🏗 vacía |
 
 ### 9.13 Otros directorios
@@ -688,10 +712,10 @@ job de tests con matriz Python 3.11 / 3.12, instalando `pip install -e ".[dev]"`
 
 ### ❌ Pendiente
 
-- [x] Tests del código del proyecto (`tests/`) — unit (cleaning, scraper, transformations) + integración (pipeline)
+- [x] Tests del código del proyecto (`tests/`) — unit (cleaning, scraper, transformations, features) + integración (pipeline)
 - [ ] DVC (`dvc.yaml`, `dvc.lock`, dependencia)
 - [x] EDA estructurado (notebooks 01 y 02, ejecutados headless)
-- [ ] Feature Engineering (`src/real_estate/features`, notebook 03)
+- [x] Feature Engineering (`src/real_estate/features`, notebook 03)
 - [ ] Pipeline Train / Validation / Test
 - [ ] Baseline
 - [ ] XGBoost training pipeline
@@ -752,7 +776,11 @@ scripts/curate.py ──→ src/real_estate/curation/pipeline.py
         ↓
 data/processed/propiedades_argenprop_curado.csv
         ↓
-features/          (pendiente)
+scripts/features.py ──→ src/real_estate/features/
+                        ├── transformations.py
+                        └── pipeline.py
+        ↓
+data/processed/propiedades_argenprop_features.csv   (1.999 × 16, sin faltantes)
         ↓
 models/ (Baseline → XGBoost)
         ↓
@@ -774,6 +802,7 @@ MLflow
 ```text
 scrape.py ──→ src/real_estate/ingestion ──→ requests / BeautifulSoup / lxml
 curate.py ──→ src/real_estate/curation ──→ pandas / numpy / pydantic-settings
+features.py ──→ src/real_estate/features ──→ scikit-learn / numpy / pandas
 train.py  ──→ src/real_estate/models ──→ scikit-learn / xgboost
              └──→ src/real_estate/tracking ──→ mlflow
 explain.py ──→ src/real_estate/explainability ──→ shap
@@ -790,16 +819,16 @@ explain.py ──→ src/real_estate/explainability ──→ shap
 | `Makefile` | El archivo se llama `MakeFile` | Renombrar o aceptar el nombre actual |
 | `scripts/scrape.py` | ✔ Migrado: `src/real_estate/ingestion/scraper.py` + `scripts/scrape.py`. La raíz quedó limpia | ✔ |
 | `scripts/curate.py` | ✔ Implementado: `src/real_estate/curation/` (cleaning, transformations, validation, pipeline) + `scripts/curate.py` | ✔ |
-| `scripts/` con 5 scripts | `scrape.py` y `curate.py` existen; faltan `train.py`, `evaluate.py`, `explain.py` | Parcial |
+| `scripts/` con 5 scripts | `scrape.py`, `curate.py` y `features.py` existen; faltan `train.py`, `evaluate.py`, `explain.py` | Parcial |
 | `configs/config.yaml` | Carpeta creada, sin archivo | Pendiente |
 | `dvc.yaml` / `dvc.lock` | No existen | Pendiente |
 | `Dockerfile` / `docker-compose.yml` | No existen | Pendiente |
 | `.github/workflows/ci.yml` | ✔ Implementado: lint (Ruff), type check (Mypy) y tests (Pytest + cobertura) en Python 3.11/3.12 | ✔ |
 | `.github/workflows/dvc.yml` | No existe | Pendiente |
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
-| `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) | ✔ |
-| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations) + integration (pipeline) — 72 tests | ✔ |
-| `notebooks/` | ✔ 01 y 02 ejecutados (estructura/calidad, precio/características); 03-05 pendientes | ✔ (parcial) |
+| `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) y `propiedades_argenprop_features.csv` (16 columnas) | ✔ |
+| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features) + integration (pipeline) — 94 tests | ✔ |
+| `notebooks/` | ✔ 01, 02 y 03 ejecutados (estructura/calidad, precio/características, feature engineering); 04-05 pendientes | ✔ (parcial) |
 | `reports/`, `models/`, `mlruns/` | Vacías (esqueleto) | Pendiente |
 | Repositorio Git | ✔ Inicializado en `main`, remoto `origin` apuntando a GitHub (matiasbelsito7/real-estate-price-prediction), commit inicial pusheado | ✔ |
 | `README.md` | ✔ Actualizado: documenta scrape y curate vía `scripts/`; ya no menciona `scraper_argenprop2.py` | ✔ |

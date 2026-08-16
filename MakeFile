@@ -1,4 +1,4 @@
-.PHONY: help install install-dev scrape curate format lint typecheck test coverage check clean
+.PHONY: help install install-dev scrape curate features format lint typecheck test coverage check clean
 
 
 # ============================================================
@@ -23,6 +23,7 @@ help:
 	@echo ""
 	@echo "  make scrape        Run the Argenprop scraper (scripts/scrape.py)"
 	@echo "  make curate        Run Data Curation (scripts/curate.py)"
+	@echo "  make features      Run Feature Engineering (scripts/features.py)"
 	@echo ""
 	@echo "  make format        Format source code with Ruff"
 	@echo "  make lint          Run Ruff linter"
@@ -58,6 +59,10 @@ scrape:
 
 curate:
 	$(PYTHON) scripts/curate.py $(ARGS)
+
+
+features:
+	$(PYTHON) scripts/features.py $(ARGS)
 
 
 # ============================================================
