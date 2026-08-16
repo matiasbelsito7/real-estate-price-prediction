@@ -457,7 +457,7 @@ real-estate-price-prediction/
 |---|---|
 | **Propósito** | Gates de calidad antes de cada commit |
 | **Responsabilidades** | Ejecutar Ruff (check + format), Mypy, y validaciones generales |
-| **Hooks** | `ruff-check` (`--fix`), `ruff-format`, `mypy` (+ `pandas-stubs`, `types-requests`), `check-yaml`, `check-toml`, `end-of-file-fixer`, `trailing-whitespace`, `check-added-large-files` (`--maxkb=1000`) |
+| **Hooks** | `ruff-check` (`--fix`), `ruff-format`, `mypy` (+ `pandas-stubs`, `types-requests`, `pytest`), `check-yaml`, `check-toml`, `end-of-file-fixer`, `trailing-whitespace`, `check-added-large-files` (`--maxkb=1000`) |
 | **Dependencias** | `pyproject.toml` (versiones de herramientas), repos pre-commit |
 | **Usado por** | Flujo de calidad del desarrollador |
 
@@ -609,12 +609,17 @@ Paquete descubrible vía `pyproject.toml` (layout `src/`). Import como
 | `04_model_analysis.ipynb` | Análisis de modelos |
 | `05_shap_analysis.ipynb` | SHAP / explicabilidad |
 
-### 9.7 `tests/` (pendiente)
+### 9.7 `tests/`
 
-| Carpeta | Contenido planificado |
-|---|---|
-| `tests/unit/` | Tests unitarios (parsers, curación, features, etc.) |
-| `tests/integration/` | Tests de integración (pipelines, scripts) |
+| Ruta | Contenido | Estado |
+|---|---|---|
+| `tests/unit/test_cleaning.py` | `limpiar_numero` (14 formatos reales de Argenprop), `limpiar_columnas_numericas`, `limpiar_expensas`, `preparar_fecha` | ✔ |
+| `tests/unit/test_scraper.py` | `parsear_listing` (tarjeta completa y mínima, swap Capital Federal, fallback de moneda por `idmoneda`), helpers de URL/tipo/ambientes, ciclo CSV (header/append/ids) | ✔ |
+| `tests/unit/test_transformations.py` | `obtener_tipo_cambio` (mock de `requests`: dict/lista/sin venta/error de red/retroceso de día), `construir_tabla_tipo_cambio`, `normalizar_moneda` (USD/ARS/moneda desconocida/columnas faltantes), `normalizar_expensas`, `crear_indicadores_missing` | ✔ |
+| `tests/integration/test_pipeline.py` | `curar_csv` end-to-end sobre CSV sintético (columnas del scraper), con tipo de cambio mockeado: conversión USD/ARS, indicadores `*_informado`, conversión de tipos textuales, `FileNotFoundError` | ✔ |
+
+Nota: las funciones de `transformations` que tocan la red se prueban con el
+módulo `requests` mockeado; ningún test hace requests reales.
 
 ### 9.8 `configs/config.yaml` (pendiente)
 
@@ -677,7 +682,7 @@ el pipeline de datos. Workflows creados como carpeta vacía.
 
 ### ❌ Pendiente
 
-- [ ] Tests del código del proyecto (`tests/`) — hoy solo verificación manual
+- [x] Tests del código del proyecto (`tests/`) — unit (cleaning, scraper, transformations) + integración (pipeline)
 - [ ] DVC (`dvc.yaml`, `dvc.lock`, dependencia)
 - [ ] EDA estructurado (notebooks 01/02)
 - [ ] Feature Engineering (`src/real_estate/features`, notebook 03)
@@ -786,8 +791,9 @@ explain.py ──→ src/real_estate/explainability ──→ shap
 | `.github/workflows/{ci,dvc}.yml` | Carpeta creada, vacía | Pendiente |
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) | ✔ |
-| `notebooks/`, `tests/`, `reports/`, `models/`, `mlruns/` | Vacías (esqueleto) | Pendiente |
-| Repositorio Git | No inicializado | Pendiente |
+| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations) + integration (pipeline) — 72 tests | ✔ |
+| `notebooks/`, `reports/`, `models/`, `mlruns/` | Vacías (esqueleto) | Pendiente |
+| Repositorio Git | ✔ Inicializado en `main`, remoto `origin` apuntando a GitHub (matiasbelsito7/real-estate-price-prediction), commit inicial pusheado | ✔ |
 | `README.md` | ✔ Actualizado: documenta scrape y curate vía `scripts/`; ya no menciona `scraper_argenprop2.py` | ✔ |
 
 > **Nota de entorno (resuelta):** el ambiente local tiene Python 3.14.7 +
@@ -795,7 +801,10 @@ explain.py ──→ src/real_estate/explainability ──→ shap
 > `pyproject.toml` fija `[tool.mypy] python_version = "3.12"` (dentro del rango
 > soportado `>=3.11,<3.14`), lo que hace que `mypy` plano, el hook de pre-commit
 > y el CI futuro funcionen de forma consistente. El hook de mypy en pre-commit
-> además declara `pandas-stubs` y `types-requests` como dependencias extra.
+> además declara `pandas-stubs`, `types-requests` y `pytest` como dependencias
+> extra (pytest es necesario para tipar los decoradores `@pytest.fixture` y
+> `@pytest.mark.parametrize` en los tests: el entorno aislado del hook no
+> incluye las dependencias dev del proyecto).
 
 ---
 

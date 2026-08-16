@@ -23,6 +23,9 @@ repos:
         additional_dependencies:
           - pandas-stubs
           - types-requests
+          # pytest (con py.typed) para tipar los decoradores
+          # @pytest.mark.parametrize y @pytest.fixture de los tests.
+          - pytest
 
 
   # ==========================================================
