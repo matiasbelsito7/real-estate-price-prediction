@@ -117,6 +117,12 @@ relativo.
     (ratio mayor).
 - **Outputs:** `reports/ofertas.csv` + ranking por ratio + notebook
   `07_deteccion_oportunidades.ipynb` con la distribución de ratios.
+- **Implementado ✔:** core en `src/real_estate/serving/clasificacion.py`
+  (`clasificar_oportunidades` + `clasificar_y_exportar`), entry point
+  `scripts/clasificar_ofertas.py`, tests de unidad
+  `tests/unit/test_clasificacion.py` (13 tests, incluye precios publicados
+  inválidos y el caso degenerado de std), notebook 07 ejecutado y entrada en
+  `docs/architecture.md`.
 
 ---
 
@@ -161,8 +167,9 @@ relativo.
 ## 10. Orden de implementación
 
 1. **Fase 1** (dataset separado + programación) → base de todo. **✔ COMPLETADA.**
-2. **Fases 2 + 3** (predicción + clasificación) → el valor central. **Fase 2 ✔
-   COMPLETADA** (script + tests + docs); **fase 3 EN CURSO.**
+2. **Fases 2 + 3** (predicción + clasificación) → el valor central. **✔
+   COMPLETADAS** (fase 2: `evaluar_nuevas.py` + tests + docs; fase 3:
+   `clasificar_ofertas.py` + `clasificacion.py` + 13 tests + notebook 07 + docs).
 3. **Fases 4 + 5** (modelos lineales + tuning) → en paralelo, ambos dependen
    solo del pipeline existente.
 4. **Fase 6** (MLflow) → transversal, se va haciendo en cada fase.

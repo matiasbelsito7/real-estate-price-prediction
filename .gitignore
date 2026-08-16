@@ -97,6 +97,7 @@ mlruns/*
 
 reports/figures/*
 reports/metrics/*
+reports/ofertas.csv
 
 !reports/figures/.gitkeep
 !reports/metrics/.gitkeep
