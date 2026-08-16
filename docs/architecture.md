@@ -58,6 +58,7 @@ Se debe demostrar:
 - **Reproducibilidad** (configuración centralizada, versionado de datos, semillas)
 - **Versionado de datos** (DVC)
 - **Testing** (pytest, unit + integration)
+- **EDA** (análisis exploratorio, notebooks 01 y 02) ✔
 - **Linting** (Ruff)
 - **Type checking** (Mypy en modo `strict`)
 - **CI** (GitHub Actions) ✔
@@ -367,7 +368,7 @@ real-estate-price-prediction/
 ├── dvc.yaml                        ✘
 ├── dvc.lock                        ✘
 │
-├── notebooks/                      🏗 vacía (se planifican 01..05)
+├── notebooks/                      ✔ 01_eda_estructura_y_calidad, 02_eda_precio_y_caracteristicas (03..05 pendientes)
 │
 ├── src/
 │   └── real_estate/
@@ -430,7 +431,7 @@ real-estate-price-prediction/
 | **Build** | setuptools (`setuptools>=75`), layout `src/` (`[tool.setuptools.packages.find] where=["src"]`) |
 | **Python** | `>=3.11,<3.14` |
 | **Dependencias prod** | numpy, pandas, requests, beautifulsoup4, lxml, scikit-learn, xgboost, mlflow, shap, pydantic-settings, python-dotenv |
-| **Dependencias dev** | pytest, pytest-cov, ruff, mypy, pandas-stubs, pre-commit, jupyter, ipykernel |
+| **Dependencias dev** | pytest, pytest-cov, ruff, mypy, pandas-stubs, pre-commit, jupyter, ipykernel, matplotlib |
 | **Pytest** | `testpaths=["tests"]`, `pythonpath=["src"]`, addopts `-ra --strict-markers --strict-config` |
 | **Ruff** | `line-length=100`, target `py311`, reglas `E W F I B UP N SIM` (ignora `E501`), formatter: comillas dobles, espacios |
 | **Mypy** | `strict=true`, `python_version=3.12`, files `["src","tests"]`, varias advertencias estrictas |
@@ -599,15 +600,18 @@ Paquete descubrible vía `pyproject.toml` (layout `src/`). Import como
 `ARGS="..."`). A medida que existan los demás scripts, se agregan targets
 `make train`, `make evaluate`, `make explain`.
 
-### 9.6 `notebooks/` (pendiente)
+### 9.6 `notebooks/` (01/02 ✔, 03-05 pendientes)
 
-| Notebook planificado | Tema |
-|---|---|
-| `01_data_exploration.ipynb` | Exploración inicial |
-| `02_data_quality.ipynb` | Análisis de calidad de datos |
-| `03_feature_engineering.ipynb` | Ingeniería de features |
-| `04_model_analysis.ipynb` | Análisis de modelos |
-| `05_shap_analysis.ipynb` | SHAP / explicabilidad |
+| Notebook | Tema | Estado |
+|---|---|---|
+| `01_eda_estructura_y_calidad.ipynb` | Estructura (2005×32), datos faltantes, cobertura, identificadores y cardinalidad | ✔ ejecutado |
+| `02_eda_precio_y_caracteristicas.ipynb` | Distribución del target, outliers, precio vs características, correlaciones | ✔ ejecutado |
+| `03_feature_engineering.ipynb` | Ingeniería de features | Pendiente |
+| `04_model_analysis.ipynb` | Análisis de modelos | Pendiente |
+| `05_shap_analysis.ipynb` | SHAP / explicabilidad | Pendiente |
+
+Nota: ambos notebooks se ejecutan headless con
+`python -m jupyter nbconvert --to notebook --execute --inplace` (backend Agg).
 
 ### 9.7 `tests/`
 
@@ -686,7 +690,7 @@ job de tests con matriz Python 3.11 / 3.12, instalando `pip install -e ".[dev]"`
 
 - [x] Tests del código del proyecto (`tests/`) — unit (cleaning, scraper, transformations) + integración (pipeline)
 - [ ] DVC (`dvc.yaml`, `dvc.lock`, dependencia)
-- [ ] EDA estructurado (notebooks 01/02)
+- [x] EDA estructurado (notebooks 01 y 02, ejecutados headless)
 - [ ] Feature Engineering (`src/real_estate/features`, notebook 03)
 - [ ] Pipeline Train / Validation / Test
 - [ ] Baseline
@@ -795,7 +799,8 @@ explain.py ──→ src/real_estate/explainability ──→ shap
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) | ✔ |
 | `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations) + integration (pipeline) — 72 tests | ✔ |
-| `notebooks/`, `reports/`, `models/`, `mlruns/` | Vacías (esqueleto) | Pendiente |
+| `notebooks/` | ✔ 01 y 02 ejecutados (estructura/calidad, precio/características); 03-05 pendientes | ✔ (parcial) |
+| `reports/`, `models/`, `mlruns/` | Vacías (esqueleto) | Pendiente |
 | Repositorio Git | ✔ Inicializado en `main`, remoto `origin` apuntando a GitHub (matiasbelsito7/real-estate-price-prediction), commit inicial pusheado | ✔ |
 | `README.md` | ✔ Actualizado: documenta scrape y curate vía `scripts/`; ya no menciona `scraper_argenprop2.py` | ✔ |
 

@@ -57,6 +57,9 @@ dev = [
     # Jupyter
     "jupyter>=1.0,<2.0",
     "ipykernel>=6.0,<7.0",
+
+    # Visualización (EDA)
+    "matplotlib>=3.8,<4.0",
 ]
 
 
