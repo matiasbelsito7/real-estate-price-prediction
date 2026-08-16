@@ -389,18 +389,19 @@ real-estate-price-prediction/
 │       │   └── pipeline.py         ✔ (orquestador construir_features + splits)
 │       ├── models/                ✔ entrenamiento.py (baseline, XGBoost, sin fuga)
 │       ├── explainability/        🏗 vacío
-│       ├── tracking/              🏗 vacío
+│       ├── tracking/              ✔ experimentos.py (MLflow: params, métricas,
+│       │                             artefactos, Model Registry)
 │       └── utils/                 🏗 vacío
 │
 ├── scripts/
 │   ├── scrape.py                   ✔ (entry point de adquisición)
 │   ├── curate.py                   ✔ (entry point de curación)
 │   ├── features.py                 ✔ (entry point de feature engineering)
-│   └── train.py                    ✔ (entry point de modelado)
+│   └── train.py                    ✔ (entry point de modelado + tracking MLflow)
 │   (se planifican evaluate/explain)
 │
 ├── tests/
-│   ├── unit/                       ✔ (cleaning, scraper, transformations, features, models)
+│   ├── unit/                       ✔ (cleaning, scraper, transformations, features, models, tracking)
 │   └── integration/                ✔ (pipeline de curación)
 │
 ├── models/                         🏗 vacía
@@ -409,7 +410,7 @@ real-estate-price-prediction/
 │   ├── figures/                    🏗 vacía
 │   └── metrics/                    🏗 vacía
 │
-├── mlruns/                         🏗 vacía
+├── mlruns/                         ✔ (store local de MLflow, gitignored)
 │
 ├── docs/
 │   └── architecture.md             ✔ (este documento)
@@ -582,15 +583,15 @@ real-estate-price-prediction/
 
 Paquete descubrible vía `pyproject.toml` (layout `src/`). Import como
 `real_estate.*`. `ingestion/`, `curation/`, `features/` y `models/` ya están
-implementados (secciones 9.2, 9.3, 9.4b y 9.4c). Los siguientes subpaquetes
-existen pero están vacíos:
+implementados (secciones 9.2, 9.3, 9.4b, 9.4c y 9.4d). Los siguientes
+subpaquetes existen pero están vacíos:
 
 | Subpaquete | Responsabilidad |
 |---|---|
 | `features/` | ✔ Implementado: selección de columnas, target `log_precio_usd`, codificación ordinal por mediana de precio, imputación por mediana, splits train/val/test (sección 9.4b) |
 | `models/` | ✔ Implementado: entrenamiento y evaluación con preprocesamiento sin fuga (sección 9.4c) |
+| `tracking/` | ✔ Implementado: integración con MLflow — experimentos, params, métricas, artefactos y Model Registry (sección 9.4d) |
 | `explainability/` | SHAP analysis |
-| `tracking/` | Integración con MLflow (experimentos, registry) |
 | `utils/` | Utilidades transversales (config con pydantic-settings, logging, etc.) |
 
 #### 9.4b `features/` (implementado en la fase 4)
@@ -632,6 +633,34 @@ Resultados sobre el dataset real (fase 5):
 XGBoost reduce el RMSE log en ~58 % respecto del baseline; error relativo
 mediano en test: 2,5 %.
 
+#### 9.4d `tracking/` (implementado en la fase 6)
+
+| Archivo | Contenido |
+|---|---|
+| `experimentos.py` | `configurar_tracking` (URI + experimento, creándolo si no existe), `registrar_resultado` (abre la corrida: loguea params, métricas, artefacto JSON `resumen_entrenamiento.json`, modelo XGBoost con firma vía `infer_signature` y lo versiona en el Model Registry; devuelve `(run_id, version)`), `finalizar_corrida` |
+
+Decisiones de diseño:
+- **`models/entrenamiento.py` se mantiene puro:** el tracking se inyecta desde
+  `tracking/` sin acoplarlo al entrenamiento.
+- **Sin fuga también en el artefacto:** `registrar_resultado` reconstruye
+  `x_train`/`y_train` reaplicando el preprocesamiento aprendido sobre train
+  (vía `resultado.ajustes`), en vez de re-entrenar o duplicar lógica.
+- **URI resoluble:** argumento explícito → `MLFLOW_TRACKING_URI` → store local
+  `mlruns/` (gitignored). MLflow 3.x requiere `MLFLOW_ALLOW_FILE_STORE=true`
+  para el store de archivos; se habilita por defecto en `configurar_tracking`.
+- **MLflow 3.x (arquitectura modelo-céntrica):** `log_model` escribe el modelo
+  en el repositorio de modelos del store (`models:/m-<uuid>`), no en los
+  artefactos de la corrida; `register_model` crea la versión en el Model
+  Registry.
+- **Métricas prefijadas** (`baseline_val_*`, `xgboost_val_*`, `xgboost_test_*`)
+  para evitar colisiones de nombre; params de XGBoost logueados completos vía
+  `get_params()`.
+
+Resultado sobre el dataset real (fase 6): experimento
+`prediccion_precios_propiedades`, corrida con las métricas de la sección 9.4c
+y modelo `modelo_precio_propiedades` en el Model Registry (versión 1, con
+firma de entrada/salida para servir el modelo).
+
 ### 9.5 `scripts/`
 
 | Script | Estado | Responsabilidad |
@@ -639,7 +668,7 @@ mediano en test: 2,5 %.
 | `scrape.py` | ✔ implementado | Orquestar la adquisición (usa `src/real_estate/ingestion`) |
 | `curate.py` | ✔ implementado | Orquestar la curación (usa `src/real_estate/curation`) |
 | `features.py` | ✔ implementado | Orquestar el feature engineering (usa `src/real_estate/features`) |
-| `train.py` | ✔ implementado | Orquestar el entrenamiento (usa `src/real_estate/models`; CLI `--input` y `--random-state`) |
+| `train.py` | ✔ implementado | Orquestar el entrenamiento + tracking MLflow (usa `src/real_estate/models` y `src/real_estate/tracking`; CLI `--input`, `--random-state` y `--no-tracking`) |
 | `evaluate.py` | ✘ pendiente | Evaluación de modelos |
 | `explain.py` | ✘ pendiente | Explicabilidad (SHAP) |
 
@@ -669,6 +698,7 @@ Nota: los notebooks se ejecutan headless con
 | `tests/unit/test_transformations.py` | `obtener_tipo_cambio` (mock de `requests`: dict/lista/sin venta/error de red/retroceso de día), `construir_tabla_tipo_cambio`, `normalizar_moneda` (USD/ARS/moneda desconocida/columnas faltantes), `normalizar_expensas`, `crear_indicadores_missing` | ✔ |
 | `tests/unit/test_features.py` | `seleccionar_columnas`, `crear_target_log` (filtro de inválidos y de artefactos < 1.000 USD), `crear_orden_mediana`, `codificar_ordinal`, imputación, `construir_features` end-to-end y `dividir_train_val_test` (tamaños, disjunción, reproducibilidad) — 22 tests | ✔ |
 | `tests/unit/test_models.py` | `ajustar_preprocesamiento` (aprende ordenes e imputador, ignora columnas ausentes), `aplicar_preprocesamiento` (codifica/imputa, categoría solo en val -> `CODIGO_DESCONOCIDO`, no modifica el original), `separar_features_target`, `calcular_metricas`, `entrenar_baseline` (mediana), `entrenar_xgboost` (shape, reproducibilidad, params) y `entrenar_y_evaluar` end-to-end (supera al baseline) — 15 tests | ✔ |
+| `tests/unit/test_tracking.py` | `configurar_tracking` (crea experimento en store local, respeta env `MLFLOW_TRACKING_URI`), `registrar_resultado` (devuelve run_id + versión y cierra la corrida; loguea params, métricas, artefacto `resumen_entrenamiento.json`; modelo con firma en el Model Registry), versionado v1/v2 y `finalizar_corrida` — 7 tests | ✔ |
 | `tests/integration/test_pipeline.py` | `curar_csv` end-to-end sobre CSV sintético (columnas del scraper), con tipo de cambio mockeado: conversión USD/ARS, indicadores `*_informado`, conversión de tipos textuales, `FileNotFoundError` | ✔ |
 
 Nota: las funciones de `transformations` que tocan la red se prueban con el
@@ -713,7 +743,7 @@ job de tests con matriz Python 3.11 / 3.12, instalando `pip install -e ".[dev]"`
 | `models/` | 🏗 vacía | Artefactos de modelos (futuro) |
 | `reports/figures/` | 🏗 vacía | Figuras para reportes |
 | `reports/metrics/` | 🏗 vacía | Métricas de evaluación |
-| `mlruns/` | 🏗 vacía | Ruta local de MLflow (futuro) |
+| `mlruns/` | ✔ en uso | Store local de MLflow (experimentos, corridas y repositorio de modelos; gitignored) |
 | `docs/architecture.md` | ✔ | Este documento (mapa vivo) |
 
 ---
@@ -745,7 +775,7 @@ job de tests con matriz Python 3.11 / 3.12, instalando `pip install -e ".[dev]"`
 - [x] Pipeline Train / Validation / Test
 - [x] Baseline
 - [x] XGBoost training pipeline
-- [ ] MLflow tracking (`src/real_estate/tracking`)
+- [x] MLflow tracking (`src/real_estate/tracking`)
 - [ ] Model evaluation
 - [ ] SHAP analysis (`src/real_estate/explainability`, notebook 05)
 - [x] GitHub Actions (`ci.yml`); `dvc.yml` pendiente hasta implementar DVC
@@ -810,9 +840,9 @@ data/processed/propiedades_argenprop_features.csv   (1.999 × 16, sin faltantes)
         ↓
 scripts/train.py ──→ src/real_estate/models/entrenamiento.py  (Baseline → XGBoost)
         ↓
-tracking/ (MLflow)
+src/real_estate/tracking (MLflow: params / métricas / artefactos + Model Registry)
         ↓
-explainability/ (SHAP)  +  models/ (artefacto) → Docker / Deployment
+modelo_precio_propiedades (versión con firma) → explainability/ (SHAP) → Docker / Deployment
 ```
 
 ### Dependencias de software (ejemplo)
@@ -853,10 +883,11 @@ explain.py ──→ src/real_estate/explainability ──→ shap
 | `.github/workflows/dvc.yml` | No existe | Pendiente |
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) y `propiedades_argenprop_features.csv` (16 columnas) | ✔ |
-| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models) + integration (pipeline) — 109 tests | ✔ |
+| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking) + integration (pipeline) — 116 tests | ✔ |
 | `src/real_estate/models` | ✔ Implementado en la fase 5: `entrenamiento.py` (baseline, XGBoost, evaluación sin fuga) | ✔ |
 | `notebooks/` | ✔ 01..04 ejecutados (estructura/calidad, precio/características, feature engineering, model analysis); 05 pendiente | ✔ (parcial) |
-| `reports/`, `models/`, `mlruns/` | Vacías (esqueleto) | Pendiente |
+| `reports/`, `models/` | Vacías (esqueleto) | Pendiente |
+| `mlruns/` | ✔ En uso: store local de MLflow (experimentos, corridas, repositorio de modelos) — gitignored | ✔ |
 | Repositorio Git | ✔ Inicializado en `main`, remoto `origin` apuntando a GitHub (matiasbelsito7/real-estate-price-prediction), commit inicial pusheado | ✔ |
 | `README.md` | ✔ Actualizado: documenta scrape y curate vía `scripts/`; ya no menciona `scraper_argenprop2.py` | ✔ |
 

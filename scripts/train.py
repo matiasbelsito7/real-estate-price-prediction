@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Entry point de la etapa de Modelado (Fase 5).
+Entry point de la etapa de Modelado (Fases 5 y 6).
 
 Uso:
     python scripts/train.py
     python scripts/train.py --input data/processed/propiedades_argenprop_curado.csv
+    python scripts/train.py --no-tracking
 
 Etapas:
     1. Carga del dataset curado, selección de columnas y target logarítmico.
@@ -13,9 +14,12 @@ Etapas:
        val / test.
     4. Baseline (mediana) y XGBoost entrenados sobre train.
     5. Evaluación sobre val (comparación) y sobre test (modelo final).
+    6. Tracking con MLflow: parámetros, métricas, artefacto JSON de resumen y
+       modelo XGBoost con firma, versionado en el Model Registry.
 
-Nota: el guardado de artefactos del modelo y el tracking con MLflow llegan en
-la fase 6.
+El tracking se puede desactivar con `--no-tracking` (útil para pruebas). El
+tracking URI respeta `MLFLOW_TRACKING_URI` si está definido; si no, usa el
+store local `mlruns/`.
 """
 
 import argparse
@@ -35,9 +39,18 @@ from real_estate.features.transformations import (  # noqa: E402
     seleccionar_columnas,
 )
 from real_estate.models.entrenamiento import entrenar_y_evaluar  # noqa: E402
+from real_estate.tracking import (  # noqa: E402
+    MODELO_DEFAULT,
+    configurar_tracking,
+    registrar_resultado,
+)
 
 
-def entrenar_pipeline(input_file: str | Path, random_state: int = 42) -> None:
+def entrenar_pipeline(
+    input_file: str | Path,
+    random_state: int = 42,
+    no_tracking: bool = False,
+) -> None:
     """Corre el pipeline de modelado completo y reporta las métricas."""
 
     input_path = Path(input_file)
@@ -53,18 +66,33 @@ def entrenar_pipeline(input_file: str | Path, random_state: int = 42) -> None:
 
     train, val, test = dividir_train_val_test(df, random_state=random_state)
 
-    entrenar_y_evaluar(train, val, test, random_state=random_state)
+    if not no_tracking:
+        experimento = configurar_tracking()
+        print(f"\nTracking MLflow: experimento '{experimento}'")
+
+    resultado = entrenar_y_evaluar(train, val, test, random_state=random_state)
+
+    if not no_tracking:
+        run_id, version = registrar_resultado(
+            resultado,
+            train,
+            random_state=random_state,
+            dataset_info=str(input_path),
+            split_sizes={"train": len(train), "val": len(val), "test": len(test)},
+        )
+        print(f"Run MLflow: {run_id}")
+        print(f"Modelo registrado en el Model Registry: '{MODELO_DEFAULT}' versión {version}")
 
     print("\n" + "=" * 70)
-    print("MODELADO FINALIZADO (fase 5)")
+    print("MODELADO FINALIZADO (fases 5 y 6)")
     print("=" * 70)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Modelado: pipeline train/val/test sin fuga, baseline (mediana) y "
-            "XGBoost con evaluación sobre el dataset curado"
+            "Modelado: pipeline train/val/test sin fuga, baseline (mediana), "
+            "XGBoost y tracking de experimentos con MLflow"
         )
     )
     parser.add_argument(
@@ -78,9 +106,18 @@ def main() -> None:
         default=42,
         help="Semilla para el split y el entrenamiento (default: 42)",
     )
+    parser.add_argument(
+        "--no-tracking",
+        action="store_true",
+        help="Desactiva el tracking con MLflow (por defecto está activo)",
+    )
     args = parser.parse_args()
 
-    entrenar_pipeline(input_file=args.input, random_state=args.random_state)
+    entrenar_pipeline(
+        input_file=args.input,
+        random_state=args.random_state,
+        no_tracking=args.no_tracking,
+    )
 
 
 if __name__ == "__main__":
