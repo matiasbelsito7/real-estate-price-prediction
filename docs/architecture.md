@@ -428,6 +428,7 @@ real-estate-price-prediction/
 │
 ├── scripts/
 │   ├── scrape.py                   ✔ (entry point de adquisición)
+│   ├── scrape_nuevas.py            ✔ (adquisición de nuevas publicaciones a dataset separado, para corridas programadas)
 │   ├── curate.py                   ✔ (entry point de curación)
 │   ├── features.py                 ✔ (entry point de feature engineering)
 │   ├── train.py                    ✔ (entry point de modelado + tracking MLflow)
@@ -450,7 +451,8 @@ real-estate-price-prediction/
 ├── mlruns/                         ✔ (store local de MLflow, gitignored)
 │
 ├── docs/
-│   └── architecture.md             ✔ (este documento)
+│   ├── architecture.md             ✔ (este documento)
+│   └── roadmap.md                  ✔ (roadmap de predicción + detección de oportunidades de compra)
 │
 └── .github/
     └── workflows/
@@ -538,7 +540,7 @@ real-estate-price-prediction/
 | **Dependencias** | `requests`, `beautifulsoup4`, `lxml` |
 | **Constantes** | `BASE_URL`, `HEADERS`, `COLUMNS` (20), `TIPOS_PROPIEDAD` (18), `ICONO_A_COLUMNA`, `RE_AMBIENTES_EN_URL`, `STATUS_BLOQUEO` (202), `MAX_PAGINAS_SERVICIO` (100), `BARRIOS_CABA` (54 slugs) |
 | **Funciones** | `construir_url_pagina` (con `base_url` para segmentos), `construir_url_segmento` (tipo/barrio), `texto_o_none`, `detectar_tipo_propiedad`, `extraer_ambientes_de_url`, `extraer_features_de_tarjeta`, `parsear_listing`, `cargar_ids_existentes`, `asegurar_encabezado`, `guardar_filas`, `cargar_progreso`, `guardar_progreso`, `pagina_de_reanudacion`, `scrapear` |
-| **Comportamiento** | Resumen por `id`: si se corta, al volver a correr no re-baja avisos ya presentes. Precio/moneda desde atributos `data` del link; ambientes desde la URL del aviso; alerta si 3 páginas seguidas no traen features (cambio de estructura del sitio). **202:** si `pagina >= 100` es el cap del servidor → segmento completo; si no, reintenta con backoff exponencial (`backoff_202_inicial * 2^n`, máx 120 s), pausa larga (`pausa_bloqueo`) al agotar los reintentos (máx 2) y luego abandona el segmento como incompleto. 404 y página vacía → segmento completo. Guarda `{"pagina": ultima_ok, "completo": bool}` en el archivo de progreso tras cada página |
+| **Comportamiento** | Resumen por `id`: si se corta, al volver a correr no re-baja avisos ya presentes. Precio/moneda desde atributos `data` del link; ambientes desde la URL del aviso; alerta si 3 páginas seguidas no traen features (cambio de estructura del sitio). **202:** si `pagina >= 100` es el cap del servidor → segmento completo; si no, reintenta con backoff exponencial (`backoff_202_inicial * 2^n`, máx 120 s), pausa larga (`pausa_bloqueo`) al agotar los reintentos (máx 2) y luego abandona el segmento como incompleto. 404 y página vacía → segmento completo. Guarda `{"pagina": ultima_ok, "completo": bool}` en el archivo de progreso tras cada página. **`revision_periodica` (bool, default False):** si es True, re-escaneea el segmento aunque el progreso lo tenga como completo (útil para corridas programadas que capturan publicaciones nuevas; el dedup por `id` evita duplicados y una corrida interrumpida sigue reanudando) |
 | **Usado por** | `scripts/scrape.py` |
 | **Outputs** | `data/raw/propiedades_argenprop.csv` (o `--output`), `data/raw/progreso_scrape.json` (o `--progreso`) |
 | **Relación** | Alimenta la etapa de Data Curation. `banos`/`cocheras` quedan mayormente vacíos por limitación del listado (no es un bug) |
@@ -778,6 +780,7 @@ subestima las altas (-15.8 % por encima de $235.000). Figuras
 | Script | Estado | Responsabilidad |
 |---|---|---|
 | `scrape.py` | ✔ implementado | Orquestar la adquisición (usa `src/real_estate/ingestion`) |
+| `scrape_nuevas.py` | ✔ implementado | Orquestar la adquisición de **nuevas publicaciones** a un dataset separado (`data/raw/propiedades_nuevas.csv`), pensado para corridas programadas: usa `scrapear(..., revision_periodica=True)` para re-escanear segmentos completos; el dedup es interno a ese dataset (no toca el de entrenamiento) |
 | `curate.py` | ✔ implementado | Orquestar la curación (usa `src/real_estate/curation`) |
 | `features.py` | ✔ implementado | Orquestar el feature engineering (usa `src/real_estate/features`) |
 | `train.py` | ✔ implementado | Orquestar el entrenamiento + tracking MLflow (usa `src/real_estate/models` y `src/real_estate/tracking`; CLI `--input`, `--random-state` y `--no-tracking`) |
@@ -809,7 +812,7 @@ Nota: los notebooks se ejecutan headless con
 | Ruta | Contenido | Estado |
 |---|---|---|
 | `tests/unit/test_cleaning.py` | `limpiar_numero` (14 formatos reales de Argenprop), `limpiar_columnas_numericas`, `limpiar_expensas`, `preparar_fecha` | ✔ |
-| `tests/unit/test_scraper.py` | `parsear_listing` (tarjeta completa y mínima, swap Capital Federal, fallback de moneda por `idmoneda`), helpers de URL/tipo/ambientes, ciclo CSV (header/append/ids), `construir_url_segmento` (tipo/barrio), progreso (guardar/cargar/corrupto/reanudación), `scrapear` con 202 (cap en página 100 → completo sin reintentar; 202 temprano → reintenta y avanza; bloqueo sostenido → incompleto y reanudable; segmento completo se saltea; reanudación desde última página guardada; cap respetado aunque `reintentos-202` sea alto) — 39 tests | ✔ |
+| `tests/unit/test_scraper.py` | `parsear_listing` (tarjeta completa y mínima, swap Capital Federal, fallback de moneda por `idmoneda`), helpers de URL/tipo/ambientes, ciclo CSV (header/append/ids), `construir_url_segmento` (tipo/barrio), progreso (guardar/cargar/corrupto/reanudación), `scrapear` con 202 (cap en página 100 → completo sin reintentar; 202 temprano → reintenta y avanza; bloqueo sostenido → incompleto y reanudable; segmento completo se saltea; reanudación desde última página guardada; cap respetado aunque `reintentos-202` sea alto), `revision_periodica` (reescaneea segmentos completos deduplicando; el default sigue salteándolos; reanuda corridas incompletas) — 42 tests | ✔ |
 | `tests/unit/test_transformations.py` | `cargar_tipo_cambio_historico` (CSV válido/ruta inexistente/filas sin venta), `obtener_tipo_cambio` (mock de `requests`: dict/lista/sin venta/error de red/retroceso de día), `construir_tabla_tipo_cambio` (una consulta por fecha; histórico local sin consultar API; fallback a API; sin ruta → solo API), `normalizar_moneda` (USD/ARS/moneda desconocida/columnas faltantes), `normalizar_expensas`, `crear_indicadores_missing` — 22 tests | ✔ |
 | `tests/unit/test_features.py` | `seleccionar_columnas`, `crear_target_log` (filtro de inválidos y de artefactos < 1.000 USD), `crear_orden_mediana`, `codificar_ordinal`, imputación, `construir_features` end-to-end y `dividir_train_val_test` (tamaños, disjunción, reproducibilidad) — 22 tests | ✔ |
 | `tests/unit/test_models.py` | `ajustar_preprocesamiento` (aprende ordenes e imputador, ignora columnas ausentes), `aplicar_preprocesamiento` (codifica/imputa, categoría solo en val -> `CODIGO_DESCONOCIDO`, no modifica el original), `separar_features_target`, `calcular_metricas`, `entrenar_baseline` (mediana), `entrenar_xgboost` (shape, reproducibilidad, params) y `entrenar_y_evaluar` end-to-end (supera al baseline) — 15 tests | ✔ |
@@ -961,6 +964,7 @@ validación real es de la definición del pipeline. Se dispara en push/PR a
 | `reports/metrics/` | 🏗 vacía | Métricas de evaluación |
 | `mlruns/` | ✔ en uso | Store local de MLflow (experimentos, corridas y repositorio de modelos; gitignored) |
 | `docs/architecture.md` | ✔ | Este documento (mapa vivo) |
+| `docs/roadmap.md` | ✔ | Roadmap de predicción de precio + detección de oportunidades de compra (buena/mala compra, score relativo, modelos lineales, tuning XGBoost, MLflow) |
 
 ---
 
@@ -1113,7 +1117,9 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `Makefile` | El archivo se llama `MakeFile` | Renombrar o aceptar el nombre actual |
 | `scripts/scrape.py` | ✔ Migrado: `src/real_estate/ingestion/scraper.py` + `scripts/scrape.py`. La raíz quedó limpia. **v3:** segmentación por barrio/tipo (54 barrios), manejo del cap 202, backoff y progreso JSON reanudable | ✔ |
 | `scripts/curate.py` | ✔ Implementado: `src/real_estate/curation/` (cleaning, transformations, validation, pipeline) + `scripts/curate.py` | ✔ |
-| `scripts/` | `scrape.py`, `curate.py`, `features.py`, `train.py` y `download_tipo_cambio.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
+| `scripts/` | `scrape.py`, `scrape_nuevas.py`, `curate.py`, `features.py`, `train.py` y `download_tipo_cambio.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
+| `scripts/scrape_nuevas.py` | ✔ Implementado (fase 12 / roadmap): dataset separado de nuevas publicaciones con `revision_periodica` (re-escaneea segmentos completos, dedup interno al dataset de nuevas) | ✔ |
+| `docs/roadmap.md` | ✔ Creado: roadmap de predicción de precio + detección de oportunidades (buena/mala compra con score relativo), fases 1-6 con decisiones tomadas | ✔ |
 | `configs/config.yaml` | Carpeta creada, sin archivo | Pendiente |
 | `dvc.yaml` / `dvc.lock` | ✔ Implementado: etapas `curar` y `features` con hashes md5. Remote por defecto `local` → `dvcstore/` | ✔ |
 | `Dockerfile` / `docker-compose.yml` | ✔ Implementado (fase 11): `Dockerfile` multi-stage + `requirements-api.txt` + `docker-compose.yml` con bundle montado como volumen de solo lectura | ✔ |
@@ -1122,7 +1128,7 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) y `propiedades_argenprop_features.csv` (16 columnas) | ✔ |
 | `data/external/` | Contiene `tipo_cambio_blue.csv` (5.702 fechas de dólar blue, trackeado con DVC; fuente primaria de `normalizar_moneda`, fallback a la API) | ✔ |
-| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion, serving) + integration (pipeline, API FastAPI) — 174 tests | ✔ |
+| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, tracking, explainability, evaluacion, serving) + integration (pipeline, API FastAPI) — 183 tests | ✔ |
 | `src/real_estate/models` | ✔ Implementado en la fase 5: `entrenamiento.py` (baseline, XGBoost, evaluación sin fuga) | ✔ |
 | `src/real_estate/explainability` | ✔ Implementado en la fase 7: `shap_analysis.py` (valores SHAP, base, importancia global, figuras) | ✔ |
 | `src/real_estate/evaluacion` | ✔ Implementado en la fase 8: `analisis.py` (métricas detalladas, residuos, error por segmento, sesgo por rango, figuras) | ✔ |

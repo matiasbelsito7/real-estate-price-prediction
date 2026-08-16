@@ -426,7 +426,17 @@ def scrapear(
     reintentos_202: int = 5,
     backoff_202_inicial: float = 15.0,
     pausa_bloqueo: float = 300.0,
+    revision_periodica: bool = False,
 ) -> None:
+    """Recorre las páginas del listado guardando avisos nuevos en `output_path`.
+
+    `revision_periodica` se usa para corridas programadas (p. ej. capturar
+    publicaciones nuevas cada X días): hace que se re-escanee el segmento
+    aunque el progreso lo tenga como completo (las publicaciones nuevas
+    aparecen después de la última corrida). El dedup por `id` evita duplicar;
+    si la corrida anterior quedó incompleta, se reanuda igual desde la última
+    página procesada.
+    """
     asegurar_encabezado(output_path)
     ids_existentes = cargar_ids_existentes(output_path)
     print(f"IDs ya guardados previamente: {len(ids_existentes)}")
@@ -434,7 +444,7 @@ def scrapear(
     estado_progreso: dict[str, Any] = {}
     if archivo_progreso:
         estado_progreso = cargar_progreso(archivo_progreso)
-        if (estado_progreso.get(nombre_segmento) or {}).get("completo"):
+        if not revision_periodica and (estado_progreso.get(nombre_segmento) or {}).get("completo"):
             print(f"Segmento '{nombre_segmento}' ya quedó completo en el progreso. Lo salteo.")
             return
         reanudar_en = pagina_de_reanudacion(archivo_progreso, nombre_segmento)

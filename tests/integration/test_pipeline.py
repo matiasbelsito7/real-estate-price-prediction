@@ -96,7 +96,9 @@ def csv_crudo(tmp_path: Path) -> Path:
 @pytest.fixture
 def sin_red(monkeypatch: pytest.MonkeyPatch) -> None:
     """Evita cualquier consulta de tipo de cambio real."""
-    monkeypatch.setattr(tr, "construir_tabla_tipo_cambio", lambda fechas: {FECHA: TASA})
+    monkeypatch.setattr(
+        tr, "construir_tabla_tipo_cambio", lambda fechas, ruta_historico=None: {FECHA: TASA}
+    )
 
 
 def _leer_csv(ruta: Path) -> pd.DataFrame:

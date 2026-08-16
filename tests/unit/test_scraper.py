@@ -523,3 +523,96 @@ class TestScrapearCon202:
         # Un solo request a la página 100: el cap se detecta sin reintentar
         assert sesion.calls == MAX_PAGINAS_SERVICIO
         assert cargar_progreso(str(prog_path))["global"]["completo"] is True
+
+
+class TestRevisionPeriodica:
+    def test_reescaneea_segmento_completo_y_deduplica(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Con revision_periodica, un segmento 'completo' se vuelve a recorrer:
+        los ids ya presentes no se duplican y los nuevos sí se agregan."""
+        csv_path = tmp_path / "datos.csv"
+        prog_path = tmp_path / "progreso.json"
+
+        asegurar_encabezado(str(csv_path))
+        guardar_filas(str(csv_path), [{"id": "1000"}])
+        guardar_progreso(str(prog_path), {"palermo": {"pagina": 5, "completo": True}})
+
+        # página 1 trae el id conocido (1000) y uno nuevo (1001); página 2 = fin
+        sesion = FakeSesion(
+            [
+                FakeRespuesta(200, html_de_una_pagina(2, 1000)),
+                FakeRespuesta(404, ""),
+            ]
+        )
+        configurar_fake(monkeypatch, sesion)
+
+        scrapear(
+            str(csv_path),
+            max_paginas=None,
+            pagina_inicio=1,
+            delay_min=0.0,
+            delay_max=0.0,
+            nombre_segmento="palermo",
+            archivo_progreso=str(prog_path),
+            revision_periodica=True,
+        )
+
+        # Re-escaneeó pese al "completo"; 1000 no se duplicó, 1001 se agregó
+        assert sesion.calls == 2
+        assert cargar_ids_existentes(str(csv_path)) == {"1000", "1001"}
+
+    def test_sin_revision_periodica_sigue_salteando_completo(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """El comportamiento por defecto no cambia: completo se saltea."""
+        csv_path = tmp_path / "datos.csv"
+        prog_path = tmp_path / "progreso.json"
+        guardar_progreso(str(prog_path), {"palermo": {"pagina": 5, "completo": True}})
+        sesion = FakeSesion([FakeRespuesta(200, html_de_una_pagina(1, 1000))])
+        configurar_fake(monkeypatch, sesion)
+
+        scrapear(
+            str(csv_path),
+            max_paginas=None,
+            pagina_inicio=1,
+            delay_min=0.0,
+            delay_max=0.0,
+            nombre_segmento="palermo",
+            archivo_progreso=str(prog_path),
+        )
+
+        assert sesion.calls == 0
+        assert cargar_ids_existentes(str(csv_path)) == set()
+
+    def test_revision_periodica_reanuda_corrida_incompleta(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Con revision_periodica, una corrida incompleta se reanuda desde la
+        última página procesada (no vuelve a pedir las anteriores)."""
+        csv_path = tmp_path / "datos.csv"
+        prog_path = tmp_path / "progreso.json"
+        guardar_progreso(str(prog_path), {"palermo": {"pagina": 1, "completo": False}})
+        # página 2 OK (id 2000), página 3 = fin
+        sesion = FakeSesion(
+            [
+                FakeRespuesta(200, html_de_una_pagina(1, 2000)),
+                FakeRespuesta(404, ""),
+            ]
+        )
+        configurar_fake(monkeypatch, sesion)
+
+        scrapear(
+            str(csv_path),
+            max_paginas=None,
+            pagina_inicio=1,
+            delay_min=0.0,
+            delay_max=0.0,
+            nombre_segmento="palermo",
+            archivo_progreso=str(prog_path),
+            revision_periodica=True,
+        )
+
+        # Solo se pidieron las páginas 2 y 3 (no la 1)
+        assert sesion.calls == 2
+        assert cargar_ids_existentes(str(csv_path)) == {"2000"}
