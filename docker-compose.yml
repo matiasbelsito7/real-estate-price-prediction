@@ -1,14 +1,37 @@
 # ============================================================
-# Fase 11 — Docker
-# Orquestación del servicio de predicción.
+# Fases 11 y 12 — Docker
+# Orquestación del servicio de predicción + PostgreSQL.
 #
 # El bundle de serving (models/modelo_precio_propiedades/) se monta
 # como volumen de solo lectura: es un artefacto entrenado gitignoreado,
 # no parte de la imagen. Antes de `docker compose up` hay que ejecutar
 # `make export-model`.
+#
+# La API espera la base PostgreSQL (servicio `postgres`) para exponer
+# las oportunidades que persiste el ETL periódico. Sin la base, la API
+# igual arranca: /health y /predict funcionan, y los endpoints de
+# oportunidades responden 503.
 # ============================================================
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: real-estate-postgres
+    environment:
+      - POSTGRES_USER=realestate
+      - POSTGRES_PASSWORD=realestate
+      - POSTGRES_DB=real_estate
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U realestate -d real_estate"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -19,6 +42,17 @@ services:
       - "8000:8000"
     environment:
       - MODELO_DIR=/app/models/modelo_precio_propiedades
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=realestate
+      - POSTGRES_PASSWORD=realestate
+      - POSTGRES_DB=real_estate
     volumes:
       - ./models/modelo_precio_propiedades:/app/models/modelo_precio_propiedades:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  postgres_data:

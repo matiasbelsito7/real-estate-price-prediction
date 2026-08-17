@@ -19,6 +19,10 @@ from real_estate.api import ConfiguracionServicio, crear_app
 from real_estate.features import pipeline as pl
 from real_estate.features import transformations as tr
 from real_estate.models import entrenamiento as en
+from real_estate.persistencia.config import ConfiguracionPostgres
+from real_estate.persistencia.db import crear_engine
+from real_estate.persistencia.esquema import crear_tablas
+from real_estate.persistencia.repositorio import upsert_oportunidades
 from real_estate.serving import guardar_bundle
 
 
@@ -225,3 +229,114 @@ class TestArranque:
 
         with pytest.raises(RuntimeError, match="bundle de serving"), TestClient(app):
             pass
+
+
+FILAS_OPORTUNIDADES = pd.DataFrame(
+    [
+        {
+            "id": "1",
+            "titulo": "Depto Palermo",
+            "link": "link_1",
+            "barrio": "Palermo",
+            "tipo_propiedad": "departamento",
+            "precio_usd": 250000.0,
+            "precio_predicho_usd": 200000.0,
+            "ratio_precio": 0.8,
+            "diferencia_usd": -50000.0,
+            "diferencia_porcentual": -20.0,
+            "clasificacion": "mala_compra",
+            "fecha_prediccion": "2026-08-17",
+        },
+        {
+            "id": "2",
+            "titulo": "Casa Belgrano",
+            "link": "link_2",
+            "barrio": "Belgrano",
+            "tipo_propiedad": "casa",
+            "precio_usd": 100000.0,
+            "precio_predicho_usd": 140000.0,
+            "ratio_precio": 1.4,
+            "diferencia_usd": 40000.0,
+            "diferencia_porcentual": 40.0,
+            "clasificacion": "buena_compra",
+            "fecha_prediccion": "2026-08-17",
+        },
+    ]
+)
+
+
+@pytest.fixture
+def client_db(bundle_dir: Path, tmp_path: Path) -> Iterator[TestClient]:
+    """Cliente de la app con una base SQLite en archivo sembrada de oportunidades.
+
+    Se usa SQLite en archivo (no en memoria) para que el engine que crea la app
+    perezosamente en el lifespan vea las mismas tablas que el engine de siembra.
+    """
+
+    config_db = ConfiguracionPostgres(dsn=f"sqlite:///{tmp_path / 'oportunidades.db'}")
+    motor = crear_engine(config_db)
+    crear_tablas(motor)
+    upsert_oportunidades(motor, FILAS_OPORTUNIDADES, modelo_version="xgboost-test")
+
+    config = ConfiguracionServicio(modelo_dir=bundle_dir)
+    app = crear_app(config, config_db=config_db)
+
+    with TestClient(app) as client:
+        yield client
+
+
+class TestOportunidades:
+    def test_lista_ordenada_por_diferencia_descendente(self, client_db: TestClient) -> None:
+        respuesta = client_db.get("/oportunidades")
+
+        assert respuesta.status_code == 200
+        cuerpo = respuesta.json()
+        assert [fila["id"] for fila in cuerpo] == ["2", "1"]
+        assert cuerpo[0]["clasificacion"] == "buena_compra"
+        assert cuerpo[0]["modelo_version"] == "xgboost-test"
+
+    def test_filtra_por_clasificacion(self, client_db: TestClient) -> None:
+        respuesta = client_db.get("/oportunidades", params={"clasificacion": "mala_compra"})
+
+        assert respuesta.status_code == 200
+        assert [fila["id"] for fila in respuesta.json()] == ["1"]
+
+    def test_filtra_por_barrio(self, client_db: TestClient) -> None:
+        respuesta = client_db.get("/oportunidades", params={"barrio": "Belgrano"})
+
+        assert respuesta.status_code == 200
+        assert [fila["id"] for fila in respuesta.json()] == ["2"]
+
+    def test_pagina_con_limit_y_offset(self, client_db: TestClient) -> None:
+        respuesta = client_db.get("/oportunidades", params={"limit": 1, "offset": 1})
+
+        assert respuesta.status_code == 200
+        assert [fila["id"] for fila in respuesta.json()] == ["1"]
+
+    def test_parametros_invalidos_devuelven_422(self, client_db: TestClient) -> None:
+        respuesta = client_db.get("/oportunidades", params={"limit": 0})
+
+        assert respuesta.status_code == 422
+
+    def test_obtener_por_id(self, client_db: TestClient) -> None:
+        respuesta = client_db.get("/oportunidades/1")
+
+        assert respuesta.status_code == 200
+        fila = respuesta.json()
+        assert fila["id"] == "1"
+        assert fila["precio_usd"] == pytest.approx(250000.0)
+        assert fila["diferencia_porcentual"] == pytest.approx(-20.0)
+
+    def test_id_inexistente_devuelve_404(self, client_db: TestClient) -> None:
+        respuesta = client_db.get("/oportunidades/999")
+
+        assert respuesta.status_code == 404
+
+    def test_base_inalcanzable_devuelve_503(self, bundle_dir: Path) -> None:
+        config_db = ConfiguracionPostgres(dsn="sqlite:///C:/directorio-inexistente/base.db")
+        app = crear_app(ConfiguracionServicio(modelo_dir=bundle_dir), config_db=config_db)
+
+        with TestClient(app) as client:
+            assert client.get("/oportunidades").status_code == 503
+            assert client.get("/oportunidades/1").status_code == 503
+            assert client.get("/health").status_code == 200

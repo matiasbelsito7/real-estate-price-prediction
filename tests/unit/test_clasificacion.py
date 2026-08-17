@@ -16,8 +16,10 @@ from real_estate.serving.clasificacion import (
     BUENA_COMPRA,
     COLUMNAS_OFERTAS,
     MALA_COMPRA,
+    PRECIO_JUSTO,
     SIN_CLASIFICAR,
     clasificar_oportunidades,
+    clasificar_por_diferencia,
     clasificar_y_exportar,
 )
 
@@ -168,6 +170,92 @@ class TestZonaNeutra:
         esperado_validos = _clasificaciones_esperadas(ratios_validos)
         assert resultado["clasificacion"].tolist()[:-1] == esperado_validos
         assert resultado["clasificacion"].tolist()[-1] == SIN_CLASIFICAR
+
+
+def _df_precios(publicados: list[float], predichos: list[float]) -> pd.DataFrame:
+    """DataFrame evaluado con precios publicados y predichos explícitos."""
+
+    return pd.DataFrame(
+        {
+            "id": [str(i) for i in range(len(publicados))],
+            "titulo": [f"titulo_{i}" for i in range(len(publicados))],
+            "link": [f"link_{i}" for i in range(len(publicados))],
+            "barrio": ["Palermo"] * len(publicados),
+            "tipo_propiedad": ["departamento"] * len(publicados),
+            "precio_usd": [float(p) for p in publicados],
+            "precio_predicho_usd": [float(p) for p in predichos],
+            "fecha_prediccion": ["2026-08-16"] * len(publicados),
+        }
+    )
+
+
+class TestClasificarPorDiferencia:
+    def test_agrega_columnas_de_diferencia_y_clasificacion(self) -> None:
+        df = _df_precios([100.0], [110.0])
+
+        resultado = clasificar_por_diferencia(df)
+
+        assert "diferencia_usd" in resultado.columns
+        assert "diferencia_porcentual" in resultado.columns
+        assert "clasificacion" in resultado.columns
+
+    def test_clasifica_las_tres_categorias_con_umbral_del_10(self) -> None:
+        # +20 % -> buena compra; -20 % -> mala compra; 0 % -> precio justo.
+        df = _df_precios([100.0, 100.0, 100.0], [120.0, 80.0, 100.0])
+
+        resultado = clasificar_por_diferencia(df)
+
+        assert resultado["clasificacion"].tolist() == [BUENA_COMPRA, MALA_COMPRA, PRECIO_JUSTO]
+
+    def test_limites_del_umbral_quedan_en_precio_justo(self) -> None:
+        # Exactamente ±10 % no supera el umbral (comparación estricta).
+        df = _df_precios([100.0, 100.0], [110.0, 90.0])
+
+        resultado = clasificar_por_diferencia(df)
+
+        assert resultado["clasificacion"].tolist() == [PRECIO_JUSTO, PRECIO_JUSTO]
+
+    def test_diferencias_en_usd_y_porcentual_correctas(self) -> None:
+        df = _df_precios([200.0, 50.0], [260.0, 40.0])
+
+        resultado = clasificar_por_diferencia(df)
+
+        assert resultado["diferencia_usd"].tolist() == pytest.approx([60.0, -10.0])
+        assert resultado["diferencia_porcentual"].tolist() == pytest.approx([30.0, -20.0])
+
+    def test_umbral_configurable(self) -> None:
+        # Con umbral 30 %: +20 % queda en precio justo.
+        df = _df_precios([100.0], [120.0])
+
+        resultado = clasificar_por_diferencia(df, umbral=0.30)
+
+        assert resultado.loc[0, "clasificacion"] == PRECIO_JUSTO
+
+    def test_precio_publicado_invalido_sin_clasificar(self) -> None:
+        df = _df_precios([100.0, 0.0], [120.0, 120.0])
+
+        resultado = clasificar_por_diferencia(df)
+
+        assert resultado.loc[0, "clasificacion"] == BUENA_COMPRA
+        assert resultado.loc[1, "clasificacion"] == SIN_CLASIFICAR
+        assert resultado["diferencia_usd"].isna().loc[1]
+        assert resultado["diferencia_porcentual"].isna().loc[1]
+
+    def test_precio_publicado_faltante_sin_clasificar(self) -> None:
+        df = _df_precios([100.0, np.nan], [120.0, 120.0])
+
+        resultado = clasificar_por_diferencia(df)
+
+        assert resultado.loc[1, "clasificacion"] == SIN_CLASIFICAR
+        assert resultado["diferencia_porcentual"].isna().loc[1]
+
+    def test_no_modifica_el_dataframe_original(self) -> None:
+        df = _df_precios([100.0], [120.0])
+        columnas_originales = list(df.columns)
+
+        clasificar_por_diferencia(df)
+
+        assert list(df.columns) == columnas_originales
 
 
 class TestClasificarYExportar:

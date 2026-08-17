@@ -349,6 +349,7 @@ Validar que los datos tengan sentido y detectar anomalías:
 | API / Serving | FastAPI, Uvicorn | API de predicción (fase 10) | ✔ dependencia |
 | Configuración | Pydantic Settings, python-dotenv | Configuración y env vars | ✔ dependencia |
 | Jupyter | Jupyter, IPython kernel | Notebooks de análisis | ✔ dependencia dev |
+| Base de datos | PostgreSQL, SQLAlchemy 2.0 (Core), psycopg | Persistencia de oportunidades del ETL (fase 12) | ✔ dependencia (`sqlalchemy` + `psycopg[binary]`) |
 
 **Exclusiones explícitas:** Optuna (no se usará).
 
@@ -377,7 +378,7 @@ real-estate-price-prediction/
 ├── .env                           ✔ (local, NO versionar — ignorado por .gitignore)
 │
 ├── Dockerfile                     ✔
-├── docker-compose.yml             ✔
+├── docker-compose.yml             ✔ (fases 11 y 12: API + servicio PostgreSQL)
 ├── requirements-api.txt           ✔
 │
 ├── configs/
@@ -423,9 +424,17 @@ real-estate-price-prediction/
 │       │                             artefactos, Model Registry; registrar_lineales)
 │       │                             + comparacion.py (comparar runs → champion)
 │       ├── serving/               ✔ fase 10: modelo.py (ModeloPrediccion),
-│       │                             persistencia.py (guardar/cargar bundle)
+│       │                             persistencia.py (guardar/cargar bundle);
+│       │                             fase 12: evaluar.py (evaluar_dataframe),
+│       │                             clasificacion.py (buena/mala/precio_justo),
+│       │                             etl_oportunidades.py (orquestador del ETL)
 │       ├── api/                   ✔ fase 10: app.py (FastAPI, /health + /predict),
-│       │                             schemas.py, config.py
+│       │                             schemas.py, config.py;
+│       │                             fase 12: /oportunidades (+ {id}) sobre PostgreSQL
+│       ├── persistencia/          ✔ fase 12: config.py (ConfiguracionPostgres),
+│       │                             db.py (crear_engine), esquema.py (tabla
+│       │                             oportunidades), repositorio.py (upsert/listar/
+│       │                             obtener/ids_procesados)
 │       └── utils/                 🏗 vacío
 │
 ├── scripts/
@@ -439,12 +448,14 @@ real-estate-price-prediction/
 │   ├── comparar_runs.py            ✔ roadmap fase 6 (comparar corridas de MLflow y elegir champion)
 │   ├── exportar_modelo.py          ✔ fase 10 (entry point de exportación del bundle de serving; registra el champion en el Model Registry)
 │   ├── evaluar_nuevas.py           ✔ roadmap fase 2 (entry point de predicción sobre nuevas publicaciones)
-│   └── clasificar_ofertas.py       ✔ roadmap fase 3 (entry point de clasificación buena/mala compra)
+│   ├── clasificar_ofertas.py       ✔ roadmap fase 3 (entry point de clasificación buena/mala compra)
+│   └── etl_oportunidades.py        ✔ fase 12 (entry point del ETL periódico: scrape opcional de CABA +
+│                                       predicción con el champion + clasificación + persistencia en PostgreSQL)
 │   (se planifican evaluate/explain)
 │
 ├── tests/
-│   ├── unit/                       ✔ (cleaning, scraper, transformations, features, models, modelos_lineales, tracking, explainability, evaluacion, serving)
-│   └── integration/                ✔ (pipeline de curación, API FastAPI)
+│   ├── unit/                       ✔ (cleaning, scraper, transformations, features, models, modelos_lineales, tracking, explainability, evaluacion, serving, clasificacion, repositorio)
+│   └── integration/                ✔ (pipeline de curación, evaluar_nuevas, API FastAPI, ETL periódico)
 │
 ├── models/
 │   └── modelo_precio_propiedades/  ✔ fase 10: bundle de serving (modelo, preprocesamiento,
@@ -464,7 +475,8 @@ real-estate-price-prediction/
 └── .github/
     └── workflows/
         ├── ci.yml                  ✔ (lint + type check + tests)
-        └── dvc.yml                 ✔ (valida etapas, estado y pull best-effort)
+        ├── dvc.yml                 ✔ (valida etapas, estado y pull best-effort)
+        └── etl_oportunidades.yml   ✔ (fase 12: ETL periódico cada 4 días con PostgreSQL efímero)
 ```
 
 > **Nota:** el repositorio está versionado en
@@ -501,7 +513,7 @@ real-estate-price-prediction/
 |---|---|
 | **Propósito** | Interfaz estándar para ejecutar tareas del proyecto |
 | **Responsabilidades** | Envolver comandos de instalación, calidad, testing y limpieza |
-| **Targets actuales** | `install`, `install-dev`, `scrape`, `curate`, `features`, `train`, `train-lineales`, `tuning`, `export-model`, `serve`, `docker-build`, `docker-up`, `docker-down`, `docker-logs`, `dvc-repro`, `dvc-push`, `dvc-pull`, `dvc-status`, `format`, `lint`, `typecheck`, `test`, `coverage`, `check`, `clean` (además de `help`) |
+| **Targets actuales** | `install`, `install-dev`, `scrape`, `curate`, `features`, `train`, `train-lineales`, `tuning`, `compare`, `export-model`, `etl`, `serve`, `docker-build`, `docker-up`, `docker-down`, `docker-logs`, `dvc-repro`, `dvc-push`, `dvc-pull`, `dvc-status`, `format`, `lint`, `typecheck`, `test`, `coverage`, `check`, `clean` (además de `help`) |
 | **Targets futuros** | `evaluate`, `explain` — solo cuando los componentes existan realmente |
 | **Dependencias** | `pyproject.toml` (comandos pip/pytest/ruff/mypy) |
 | **Usado por** | Desarrolladores, CI (futuro) |
@@ -522,7 +534,7 @@ real-estate-price-prediction/
 | Atributo | Valor |
 |---|---|
 | **Propósito** | Documentar las variables de entorno requeridas |
-| **Variables** | `APP_ENV`, `LOG_LEVEL`, `DATA_DIR`, `MLFLOW_TRACKING_URI`, `SCRAPER_REQUEST_TIMEOUT`, `SCRAPER_DELAY_SECONDS`, `MODELO_DIR` (fase 10) |
+| **Variables** | `APP_ENV`, `LOG_LEVEL`, `DATA_DIR`, `MLFLOW_TRACKING_URI`, `SCRAPER_REQUEST_TIMEOUT`, `SCRAPER_DELAY_SECONDS`, `MODELO_DIR` (fase 10), `POSTGRES_HOST`/`PORT`/`USER`/`PASSWORD`/`DB` (fase 12; defaults `localhost`/`5432`/`realestate`/`realestate`/`real_estate`) |
 | **Usado por** | pydantic-settings / python-dotenv (config del proyecto) |
 
 #### Otros archivos de configuración
@@ -849,14 +861,15 @@ subestima las altas (-15.8 % por encima de $235.000). Figuras
 | `exportar_modelo.py` | ✔ implementado (fase 10) | Entrenar sobre el curado y exportar el bundle de serving a `models/modelo_precio_propiedades/`; si el tracking está activo, registra la corrida del champion (`registrar_resultado`) y la versiona en el Model Registry (usa `src/real_estate/serving` y `src/real_estate/tracking`; CLI `--input`, `--output`, `--random-state` y `--no-tracking`) |
 | `evaluar_nuevas.py` | ✔ implementado (roadmap fase 2) | Predecir el precio de las nuevas publicaciones con el bundle de serving: cura el CSV de nuevas en memoria (`curar_dataset`), carga el modelo (`cargar_bundle`) y guarda `data/processed/propiedades_nuevas_evaluadas.csv` con `precio_predicho_usd` y `fecha_prediccion` (usa `src/real_estate/serving`; CLI `--input`, `--output`, `--modelo`) |
 | `clasificar_ofertas.py` | ✔ implementado (roadmap fase 3) | Clasificar cada publicación evaluada como **buena/mala compra** (ratio `precio_predicho_usd / precio_usd` y zona neutra `1 ± std` del lote) y guardar el ranking de oportunidades `reports/ofertas.csv` ordenado por ratio descendente (usa `src/real_estate/serving`; CLI `--input`, `--output`; pensado para correrse después de `evaluar_nuevas.py` en el mismo cron) |
+| `etl_oportunidades.py` | ✔ implementado (fase 12) | Orquestar el ETL periódico de oportunidades: grupo `scrape` (mismo motor de `scrape_nuevas.py` con `revision_periodica=True`, CABA únicamente; flags `--todos-los-barrios`, `--barrios`, `--max-paginas`, `--tipo`, `--html-debug`, `--delay-min/max`, `--progreso`) y grupo `etl` (predice con el bundle del champion, clasifica por propiedad y persiste en PostgreSQL; flags `--input`, `--output`, `--modelo`). Al final escribe `reports/oportunidades_nuevas.csv` con `precio_predicho_usd`, `diferencia_usd`, `diferencia_porcentual` y `clasificacion` (usa `src/real_estate/serving/etl_oportunidades.py` + `src/real_estate/persistencia`) |
 | `evaluate.py` | ✘ pendiente | Evaluación de modelos |
 | `explain.py` | ✘ pendiente | Explicabilidad (SHAP) |
 
 **Relación con MakeFile:** `make scrape`, `make curate`, `make features`,
 `make train`, `make train-lineales`, `make tuning`, `make compare`,
-`make export-model` y `make serve` ya existen (aceptan `ARGS="..."`). A medida
-que existan los demás scripts, se agregan targets `make evaluate`,
-`make explain`.
+`make export-model`, `make serve` y `make etl` ya existen (aceptan
+`ARGS="..."`). A medida que existan los demás scripts, se agregan targets
+`make evaluate`, `make explain`.
 
 ### 9.6 `notebooks/` (01..07 ✔)
 
@@ -887,10 +900,12 @@ Nota: los notebooks se ejecutan headless con
 | `tests/unit/test_explainability.py` | `calcular_shap` (forma, base finita, nombres; propiedad aditiva base + Σ ≈ predicción), `importancia_global` (todas las features, no negativa, descendente), `grafico_resumen`/`grafico_barras` (devuelven `Figure` con ejes), `guardar_figuras` (escribe PNG no vacíos) — 5 tests | ✔ |
 | `tests/unit/test_evaluacion.py` | `metricas_detalladas` (predicción perfecta → errores 0 y R² 1; consistencia con `calcular_metricas`), `tabla_residuos` (columnas, relaciones internas, exactitud), `resumen_errores` (claves, coherencia con la tabla, sesgo cero), `metricas_por_segmento` (n por grupo, NaN aparte), `bias_por_rango_precio` (bandas balanceadas y ordenadas), gráficos (devuelven `Figure`, PNG no vacíos) — 14 tests | ✔ |
 | `tests/unit/test_serving.py` | Fase 10: round-trip `guardar_bundle`/`cargar_bundle` (archivos escritos, `preprocesamiento.json` válido), `ModeloPrediccion` (USD = `exp(log)`, equivale al pipeline de entrenamiento, invariante al reorden de columnas, categoría desconocida → `CODIGO_DESCONOCIDO`, NaN imputado con la mediana del bundle) — 9 tests | ✔ |
-| `tests/unit/test_clasificacion.py` | Roadmap fase 3: cálculo del ratio predicho/publicado (incluidos precios publicados inválidos → NaN/sin clasificar), zona neutra `1 ± std` del lote (ddof=1) en las tres categorías, caso degenerado de std (1 ratio → compara contra 1), ratio inválido que no contamina la std, flujo `clasificar_y_exportar` (ranking ordenado por ratio descendente, crea directorio padre, `FileNotFoundError`) — 13 tests | ✔ |
+| `tests/unit/test_clasificacion.py` | Roadmap fase 3 + fase 12: cálculo del ratio predicho/publicado (incluidos precios publicados inválidos → NaN/sin clasificar), zona neutra `1 ± std` del lote (ddof=1) en las tres categorías, caso degenerado de std (1 ratio → compara contra 1), ratio inválido que no contamina la std, flujo `clasificar_y_exportar` (ranking ordenado por ratio descendente, crea directorio padre, `FileNotFoundError`); fase 12: `clasificar_por_diferencia` (umbral ±10 % configurable, diferencias en USD y porcentual, precios inválidos → sin clasificar) — 21 tests | ✔ |
+| `tests/unit/test_repositorio.py` | Fase 12: `upsert_oportunidades` (inserta, actualiza por `id` sin duplicar, traduce `NaN`/`inf` a `NULL`, descarta filas sin `id` válido, devuelve cantidad, idempotencia), `ids_procesados`, `listar_oportunidades` (orden por diferencia porcentual descendente, filtros por clasificación/barrio, paginado) y `obtener_oportunidad` (existe / `None`) — 11 tests | ✔ |
 | `tests/integration/test_pipeline.py` | `curar_csv` end-to-end sobre CSV sintético (columnas del scraper), con tipo de cambio mockeado: conversión USD/ARS, indicadores `*_informado`, conversión de tipos textuales, `FileNotFoundError` | ✔ |
 | `tests/integration/test_evaluar_nuevas.py` | Roadmap fase 2: `evaluar_nuevas` end-to-end sobre CSV sintético de nuevas (bundle entrenado sobre datos sintéticos en `tmp_path`, tipo de cambio mockeado): columnas de salida, predicciones positivas y finitas, conserva `precio_usd` publicado (USD/ARS), `fecha_prediccion` = hoy, `FileNotFoundError` — 6 tests | ✔ |
-| `tests/integration/test_api.py` | Fase 10: `/health` (200, estado/modelo/versión/métricas del bundle), `/predict` (precio razonable y finito, `log` consistente, estable ante reorden del payload, indicadores `*_informado` derivados, imputación de faltantes, categoría desconocida, 422 con campos faltantes / indicador fuera de rango / valor negativo), arranque falla sin bundle — 11 tests | ✔ |
+| `tests/integration/test_api.py` | Fases 10 y 12: `/health` (200, estado/modelo/versión/métricas del bundle), `/predict` (precio razonable y finito, `log` consistente, estable ante reorden del payload, indicadores `*_informado` derivados, imputación de faltantes, categoría desconocida, 422 con campos faltantes / indicador fuera de rango / valor negativo), arranque falla sin bundle; `/oportunidades` y `/oportunidades/{id}` (listado ordenado por diferencia porcentual, filtros por clasificación/barrio, paginado, 422 con `limit` inválido, 404 con id inexistente, 503 con base inalcanzable mientras `/health` sigue en 200) — 19 tests | ✔ |
+| `tests/integration/test_etl_oportunidades.py` | Fase 12: `ejecutar_etl` end-to-end sobre CSV de nuevas sintético + bundle entrenado en `tmp_path` + PostgreSQL (SQLite en memoria): dedup contra la base, predicción + clasificación por propiedad persistidas, idempotencia (segunda corrida detecta cero nuevas) y `FileNotFoundError` — 4 tests | ✔ |
 
 Nota: las funciones de `transformations` que tocan la red se prueban con el
 módulo `requests` mockeado; ningún test hace requests reales.
@@ -933,12 +948,14 @@ por defecto a uno en la nube (S3, GCS, DAGsHub o Google Drive), p. ej.:
 `dvc remote add -d storage s3://bucket/real-estate-dvc`. El remote local
 `dvcstore/` queda como default para que el flujo funcione out-of-the-box.
 
-### 9.10 Serving + API FastAPI (Fase 10)
+### 9.10 Serving + API FastAPI (Fases 10 y 12)
 
 El modelo se expone como servicio de predicción HTTP. El flujo es:
 `make export-model` genera el **bundle de serving** en `models/modelo_precio_propiedades/`
 (modelo + preprocesamiento + orden de features + metadata) y `make serve` levanta
 la API FastAPI que lo carga al arrancar y predice sobre nuevas propiedades.
+Además, la API expone las oportunidades que persiste el ETL periódico (fase 12)
+en PostgreSQL.
 
 **Bundle de serving** (`models/modelo_precio_propiedades/`, gitignored):
 
@@ -960,10 +977,13 @@ la API FastAPI que lo carga al arrancar y predice sobre nuevas propiedades.
 |---|---|
 | `src/real_estate/serving/persistencia.py` | `guardar_bundle` / `cargar_bundle` (round-trip del bundle a disco) |
 | `src/real_estate/serving/modelo.py` | `ModeloPrediccion` (dataclass): `_construir_matriz` replica el pipeline de entrenamiento (`seleccionar_columnas` → `aplicar_preprocesamiento` → reorden por `columnas_features`), `predecir_log` / `predecir_usd` |
+| `src/real_estate/serving/evaluar.py` | `evaluar_nuevas` (fase 12): cura el CSV de nuevas en memoria y predice con el bundle → `precio_predicho_usd` + `fecha_prediccion` |
+| `src/real_estate/serving/clasificacion.py` | `clasificar_oportunidades` (ratio predicho/publicado, zona neutra `1 ± std` del lote) y `clasificar_por_diferencia` (fase 12: umbral ±10 % configurable → `buena_compra` / `precio_justo` / `mala_compra` / `sin_clasificar`, con `diferencia_usd` y `diferencia_porcentual`) |
+| `src/real_estate/serving/etl_oportunidades.py` | `ejecutar_etl` (fase 12): orquesta el ETL periódico — dedup contra la base (`ids_procesados`), predicción + clasificación por propiedad, `upsert_oportunidades` en PostgreSQL y CSV de salida con la versión del modelo |
 | `scripts/exportar_modelo.py` | Entrena sobre `data/processed/propiedades_argenprop_curado.csv`, arma el bundle y escribe `resumen_bundle.json` |
 | `src/real_estate/api/config.py` | `ConfiguracionServicio` (pydantic-settings; `modelo_dir` desde env `MODELO_DIR`, default `models/modelo_precio_propiedades`) |
-| `src/real_estate/api/schemas.py` | `PropiedadEntrada` (tipo, barrio, 6 numéricas opcionales con `ge=0`, 6 indicadores `_informado` opcionales 0/1; `None` en un indicador = derivar del valor), `PrediccionSalida` |
-| `src/real_estate/api/app.py` | `crear_app(config)` con lifespan que carga el bundle (falla con `RuntimeError` si no existe); `GET /health` (estado, modelo, versión, métricas), `POST /predict` (devuelve `precio_usd` y `log_precio_usd`); módulo `app` para uvicorn |
+| `src/real_estate/api/schemas.py` | `PropiedadEntrada` (tipo, barrio, 6 numéricas opcionales con `ge=0`, 6 indicadores `_informado` opcionales 0/1; `None` en un indicador = derivar del valor), `PrediccionSalida`, `Oportunidad` (fase 12: id, título, link, barrio, tipo, precios, ratio/diferencias, clasificación, `modelo_version`, fechas) |
+| `src/real_estate/api/app.py` | `crear_app(config, config_db)` con lifespan que carga el bundle (falla con `RuntimeError` si no existe) y crea el engine de PostgreSQL perezosamente; `GET /health` (estado, modelo, versión, métricas), `POST /predict` (devuelve `precio_usd` y `log_precio_usd`), `GET /oportunidades` (paginado, filtros por clasificación/barrio) y `GET /oportunidades/{id}` (404 si no existe); si la base no está configurada o es inalcanzable, los endpoints de oportunidades responden 503 sin tumbar `/health` ni `/predict`; módulo `app` para uvicorn |
 
 **Contrato de entrada del modelo:** 14 features — 6 numéricas imputables
 (`superficie_cubierta`, `ambientes`, `dormitorios`, `banos`, `antiguedad`,
@@ -994,13 +1014,22 @@ Conteneriza el servicio de predicción FastAPI:
 - **`requirements-api.txt`**: solo el runtime de serving (fastapi, uvicorn,
   pydantic-settings, python-dotenv, xgboost, numpy, pandas, scikit-learn) — sin
   mlflow/shap/scraping para mantener la imagen liviana.
-- **`docker-compose.yml`**: monta el bundle de serving
-  (`models/modelo_precio_propiedades/`) como volumen de solo lectura — es un
-  artefacto entrenado gitignoreado, no parte de la imagen.
+- **`docker-compose.yml`** (fase 12): dos servicios:
+  - `postgres` (`postgres:16-alpine`): base de oportunidades del ETL, con
+    credenciales `realestate`/`realestate`/`real_estate` (env `POSTGRES_*`),
+    puerto 5432, volumen nombrado `postgres_data` para los datos y healthcheck
+    `pg_isready` (`restart: unless-stopped`).
+  - `api` (build local): además del bundle montado como volumen de solo lectura
+    (`models/modelo_precio_propiedades/` — artefacto entrenado gitignoreado, no
+    parte de la imagen), recibe `POSTGRES_HOST/PORT/USER/PASSWORD/DB` en el
+    entorno y arranca recién cuando `postgres` está sano (`depends_on:
+    service_healthy`).
 
 **Uso:** `make export-model` (una vez, o tras reentrenar) → `make docker-build`
 → `make docker-up` → `make docker-logs`. La API queda en `http://localhost:8000`
-(`/health` + `/predict`).
+(`/health` + `/predict` + `/oportunidades`). El ETL periódico puede ejecutarse
+dentro del stack con `docker compose run --rm api python scripts/etl_oportunidades.py
+--todos-los-barrios`.
 
 ### 9.12 CI/CD
 
@@ -1015,6 +1044,15 @@ best-effort: si falla (el remote por defecto es local, `dvcstore/`, que no
 existe en CI), el job igualmente termina en éxito con un aviso, porque la
 validación real es de la definición del pipeline. Se dispara en push/PR a
 `main` y manualmente (`workflow_dispatch`).
+
+`etl_oportunidades.yml` (`.github/workflows/etl_oportunidades.yml`, fase 12):
+automatiza el ETL periódico de oportunidades. Se dispara con cron
+`0 11 */4 * *` (cada 4 días a las 08:00 de Argentina; el proyecto no usa DST)
+y manualmente (`workflow_dispatch`). Levanta un servicio PostgreSQL efímero,
+restaura el bundle del champion desde el secret `MODELO_BUNDLE_URL` (error duro
+si falta: el bundle es gitignoreado y el remote DVC es local, no disponible en
+CI) y ejecuta `python scripts/etl_oportunidades.py --todos-los-barrios` (CABA),
+que deduplica contra la base, predice, clasifica y persiste las oportunidades.
 
 ### 9.13 Datos
 
@@ -1036,6 +1074,25 @@ validación real es de la definición del pipeline. Se dispara en push/PR a
 | `mlruns/` | ✔ en uso | Store local de MLflow (experimentos, corridas y repositorio de modelos; gitignored) |
 | `docs/architecture.md` | ✔ | Este documento (mapa vivo) |
 | `docs/roadmap.md` | ✔ | Roadmap de predicción de precio + detección de oportunidades de compra (buena/mala compra, score relativo, modelos lineales, tuning XGBoost, MLflow) |
+
+### 9.15 Persistencia PostgreSQL (Fase 12)
+
+Capa de persistencia de las oportunidades que produce el ETL periódico. Usa
+SQLAlchemy 2.0 **Core** (sin ORM) sobre PostgreSQL (con SQLite como dialecto
+compatible en tests, vía `dsn`).
+
+| Ruta | Propósito |
+|---|---|
+| `src/real_estate/persistencia/config.py` | `ConfiguracionPostgres` (pydantic-settings): `postgres_host/port/user/password/db` desde env `POSTGRES_*` + `dsn` opcional que sobreescribe todo (permite `sqlite://` en tests); `dsn_efectivo` arma `postgresql+psycopg://...` |
+| `src/real_estate/persistencia/db.py` | `crear_engine(config)`: SQLAlchemy `Engine`; SQLite en memoria usa `StaticPool` + `check_same_thread: False`; PostgreSQL usa `pool_pre_ping=True` |
+| `src/real_estate/persistencia/esquema.py` | Tabla `oportunidades` (SQLAlchemy Core): `id` PK (String 64), título, link, barrio, tipo, `precio_usd`, `precio_predicho_usd`, `ratio_precio`, `diferencia_usd`, `diferencia_porcentual`, `clasificacion`, `modelo_version`, `fecha_prediccion`, `actualizado_en` (timestamptz, default `now()`); `crear_tablas(engine)` |
+| `src/real_estate/persistencia/repositorio.py` | `upsert_oportunidades` (ON CONFLICT por `id`, traduce `NaN`/`inf` a `NULL`, descarta filas sin `id` válido), `ids_procesados` (dedup "solo nuevas"), `listar_oportunidades` (paginado, filtros por clasificación/barrio, orden por diferencia porcentual descendente), `obtener_oportunidad` |
+| `scripts/etl_oportunidades.py` | CLI que arma `ConfiguracionPostgres` → `crear_engine` → `crear_tablas` → `ejecutar_etl` |
+
+**Upsert multi-dialecto:** el `ON CONFLICT DO UPDATE` se construye con el
+`insert()` del dialecto activo (`postgresql` o `sqlite`), elegido en runtime
+por `engine.dialect.name`. Los tests de repositorio y del ETL corren sobre
+SQLite en memoria; el único punto real es PostgreSQL.
 
 ---
 
@@ -1078,6 +1135,12 @@ validación real es de la definición del pipeline. Se dispara en push/PR a
 - [x] API de predicción FastAPI (`src/real_estate/api`, `/health` + `/predict`, `make serve`)
 - [x] Dockerfile multi-stage + `requirements-api.txt` (fase 11)
 - [x] docker-compose (fase 11)
+- [x] ETL periódico de oportunidades (fase 12: `src/real_estate/serving/etl_oportunidades.py` + `scripts/etl_oportunidades.py`, dedup "solo nuevas" contra la base)
+- [x] Persistencia PostgreSQL (fase 12: `src/real_estate/persistencia/` — config, db, esquema, repositorio)
+- [x] Clasificación por propiedad (fase 12: `clasificar_por_diferencia` con umbral ±10 % → `buena_compra`/`precio_justo`/`mala_compra`, con `diferencia_usd` y `diferencia_porcentual`)
+- [x] API de oportunidades sobre PostgreSQL (fase 12: `GET /oportunidades` + `GET /oportunidades/{id}`, 503 si la base no está disponible)
+- [x] Workflow de automatización del ETL (fase 12: `.github/workflows/etl_oportunidades.yml`, cron cada 4 días 08:00 ART + `workflow_dispatch`)
+- [x] PostgreSQL integrado a Docker (fase 12: servicio `postgres` en `docker-compose.yml` + `POSTGRES_*` en la API)
 
 ---
 
@@ -1183,6 +1246,22 @@ scripts/clasificar_ofertas.py ──→ src/real_estate/serving/clasificacion.py
 reports/ofertas.csv (ranking buena/mala compra) + notebooks/07 (figura oportunidades_ratios.png)
 ```
 
+Flujo del ETL periódico de oportunidades (fase 12, cron cada 4 días):
+
+```text
+scripts/etl_oportunidades.py scrape --todos-los-barrios (revision_periodica, CABA)
+        ↓
+data/raw/propiedades_nuevas.csv
+        ↓
+scripts/etl_oportunidades.py etl ──→ src/real_estate/serving/etl_oportunidades.py
+        ├── persistencia/repositorio.ids_procesados()   (dedup "solo nuevas")
+        ├── serving/evaluar.py + clasificacion.py        (predecir + clasificar por propiedad)
+        ├── persistencia/repositorio.upsert_oportunidades() (ON CONFLICT por id)
+        └── reports/oportunidades_nuevas.csv             (precio_predicho_usd, diferencia_*, clasificacion)
+                ↓
+PostgreSQL (tabla oportunidades) ──→ src/real_estate/api/app.py (GET /oportunidades + /{id}, fase 12)
+```
+
 ### Dependencias de software (ejemplo)
 
 ```text
@@ -1222,7 +1301,7 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `Makefile` | El archivo se llama `MakeFile` | Renombrar o aceptar el nombre actual |
 | `scripts/scrape.py` | ✔ Migrado: `src/real_estate/ingestion/scraper.py` + `scripts/scrape.py`. La raíz quedó limpia. **v3:** segmentación por barrio/tipo (54 barrios), manejo del cap 202, backoff y progreso JSON reanudable | ✔ |
 | `scripts/curate.py` | ✔ Implementado: `src/real_estate/curation/` (cleaning, transformations, validation, pipeline) + `scripts/curate.py` | ✔ |
-| `scripts/` | `scrape.py`, `scrape_nuevas.py`, `curate.py`, `features.py`, `train.py`, `train_lineales.py`, `train_tuning.py`, `comparar_runs.py`, `exportar_modelo.py`, `evaluar_nuevas.py`, `clasificar_ofertas.py` y `download_tipo_cambio.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
+| `scripts/` | `scrape.py`, `scrape_nuevas.py`, `curate.py`, `features.py`, `train.py`, `train_lineales.py`, `train_tuning.py`, `comparar_runs.py`, `exportar_modelo.py`, `evaluar_nuevas.py`, `clasificar_ofertas.py`, `etl_oportunidades.py` (fase 12) y `download_tipo_cambio.py` existen; faltan `evaluate.py`, `explain.py` | Parcial |
 | `scripts/scrape_nuevas.py` | ✔ Implementado (fase 12 / roadmap): dataset separado de nuevas publicaciones con `revision_periodica` (re-escaneea segmentos completos, dedup interno al dataset de nuevas) | ✔ |
 | `scripts/evaluar_nuevas.py` | ✔ Implementado (roadmap fase 2): predicción de precio sobre las nuevas publicaciones (`src/real_estate/serving/evaluar.py`): cura en memoria + carga del bundle + `precio_predicho_usd` y `fecha_prediccion` en `data/processed/propiedades_nuevas_evaluadas.csv` | ✔ |
 | `scripts/clasificar_ofertas.py` | ✔ Implementado (roadmap fase 3): clasificación buena/mala compra (`src/real_estate/serving/clasificacion.py`): ratio `precio_predicho_usd / precio_usd` con zona neutra `1 ± std` del lote + ranking por ratio descendente en `reports/ofertas.csv` | ✔ |
@@ -1230,19 +1309,21 @@ evaluate.py ──→ src/real_estate/evaluacion ──→ scikit-learn / matplo
 | `docs/roadmap.md` | ✔ Creado: roadmap de predicción de precio + detección de oportunidades (buena/mala compra con score relativo), fases 1-6 con decisiones tomadas. Fases 1 (scrape de nuevas) ✔, 2 (predicción) ✔, 3 (clasificación buena/mala compra) ✔, 4 (modelos lineales Lasso/Ridge) ✔, 5 (tuning XGBoost) ✔ y 6 (MLflow integral: comparación + champion) ✔ | ✔ |
 | `configs/config.yaml` | Carpeta creada, sin archivo | Pendiente |
 | `dvc.yaml` / `dvc.lock` | ✔ Implementado: etapas `curar` y `features` con hashes md5. Remote por defecto `local` → `dvcstore/` | ✔ |
-| `Dockerfile` / `docker-compose.yml` | ✔ Implementado (fase 11): `Dockerfile` multi-stage + `requirements-api.txt` + `docker-compose.yml` con bundle montado como volumen de solo lectura | ✔ |
+| `Dockerfile` / `docker-compose.yml` | ✔ Implementado (fases 11 y 12): `Dockerfile` multi-stage + `requirements-api.txt` + `docker-compose.yml` con bundle montado como volumen de solo lectura y servicio `postgres` (fase 12) con healthcheck `pg_isready`; la API recibe `POSTGRES_*` y espera a que `postgres` esté sano | ✔ |
 | `.github/workflows/ci.yml` | ✔ Implementado: lint (Ruff), type check (Mypy) y tests (Pytest + cobertura) en Python 3.11/3.12 | ✔ |
 | `.github/workflows/dvc.yml` | ✔ Implementado: valida etapas (`stage list`), estado (`status`) y `pull` best-effort | ✔ |
+| `.github/workflows/etl_oportunidades.yml` | ✔ Implementado (fase 12): cron `0 11 */4 * *` (cada 4 días, 08:00 ART) + `workflow_dispatch`; servicio PostgreSQL efímero; restaura el bundle del champion desde el secret `MODELO_BUNDLE_URL` (error duro si falta) y ejecuta el ETL sobre CABA | ✔ |
 | `data/raw/` | Contiene `propiedades_argenprop.csv` (2.005 registros) | ✔ |
 | `data/processed/` | Contiene `propiedades_argenprop_curado.csv` (32 columnas) y `propiedades_argenprop_features.csv` (16 columnas) | ✔ |
 | `data/external/` | Contiene `tipo_cambio_blue.csv` (5.702 fechas de dólar blue, trackeado con DVC; fuente primaria de `normalizar_moneda`, fallback a la API) | ✔ |
-| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, modelos_lineales, tracking, explainability, evaluacion, serving, clasificacion) + integration (pipeline, evaluar_nuevas, API FastAPI) — 214 tests | ✔ |
+| `tests/` | ✔ Implementado: unit (cleaning, scraper, transformations, features, models, modelos_lineales, tracking, comparacion, tuning, explainability, evaluacion, serving, clasificacion, repositorio) + integration (pipeline, evaluar_nuevas, API FastAPI, ETL de oportunidades) — 262 tests | ✔ |
 | `src/real_estate/models` | ✔ Implementado en la fase 5: `entrenamiento.py` (baseline, XGBoost, evaluación sin fuga); roadmap fase 4: `modelos_lineales.py` (Lasso/Ridge con escalado dentro del pipeline); roadmap fase 5: `tuning.py` (GridSearchCV/RandomizedSearchCV) | ✔ |
 | `src/real_estate/tracking` | ✔ Implementado: `experimentos.py` (MLflow: params, métricas, artefactos, Model Registry, registrar_lineales/registrar_tuning) y `comparacion.py` (roadmap fase 6: `comparar_runs` / `elegir_champion`) | ✔ |
 | `src/real_estate/explainability` | ✔ Implementado en la fase 7: `shap_analysis.py` (valores SHAP, base, importancia global, figuras) | ✔ |
 | `src/real_estate/evaluacion` | ✔ Implementado en la fase 8: `analisis.py` (métricas detalladas, residuos, error por segmento, sesgo por rango, figuras) | ✔ |
-| `src/real_estate/serving` | ✔ Implementado en la fase 10: `modelo.py` (`ModeloPrediccion`) + `persistencia.py` (`guardar_bundle`/`cargar_bundle`); roadmap fase 3: `clasificacion.py` (ratio + zona `1 ± std` + ranking) | ✔ |
-| `src/real_estate/api` | ✔ Implementado en la fase 10: `app.py` (FastAPI `/health` + `/predict`), `schemas.py`, `config.py` | ✔ |
+| `src/real_estate/serving` | ✔ Implementado en la fase 10: `modelo.py` (`ModeloPrediccion`) + `persistencia.py` (`guardar_bundle`/`cargar_bundle`); roadmap fase 3: `clasificacion.py` (ratio + zona `1 ± std` + ranking); fase 12: `evaluar.py` (`evaluar_nuevas`), `clasificacion.py` (`clasificar_por_diferencia` con umbral ±10 %) y `etl_oportunidades.py` (`ejecutar_etl`) | ✔ |
+| `src/real_estate/api` | ✔ Implementado en las fases 10 y 12: `app.py` (FastAPI `/health` + `/predict` + `/oportunidades` + `/oportunidades/{id}`), `schemas.py` (agrega `Oportunidad`), `config.py`; `crear_app(config, config_db)` | ✔ |
+| `src/real_estate/persistencia` | ✔ Implementado en la fase 12: `config.py` (`ConfiguracionPostgres`), `db.py` (`crear_engine`), `esquema.py` (tabla `oportunidades` + `crear_tablas`), `repositorio.py` (upsert/dedup/listado/detalle) sobre SQLAlchemy Core con upsert multi-dialecto (PostgreSQL/SQLite) | ✔ |
 | `notebooks/` | ✔ 01..07 ejecutados (estructura/calidad, precio/características, feature engineering, model analysis, shap analysis, model evaluation, detección de oportunidades) | ✔ |
 | `reports/figures/` | ✔ En uso: figuras SHAP (05) y de evaluación (06) (gitignored) | ✔ |
 | `models/` | ✔ Bundle de serving de la fase 10 (`modelo_precio_propiedades/`; gitignored, se regenera con `make export-model`) | ✔ |

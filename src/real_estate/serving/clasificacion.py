@@ -11,10 +11,16 @@ columnas:
   zona neutra `1 ± std`, donde `std` es la desviación estándar del ratio
   computada sobre el lote de la corrida (solo ratios válidos).
 
-`clasificar_y_exportar` orquesta el flujo completo: lee el CSV evaluado,
-clasifica, ordena por ratio descendente (mejores oportunidades primero) y
-guarda `reports/ofertas.csv`. `scripts/clasificar_ofertas.py` es el entry
-point de CLI (wrapper fino).
+`clasificar_por_diferencia` clasifica **por propiedad** (no por lote): suma
+`diferencia_usd`, `diferencia_porcentual` y `clasificacion` con valores
+`buena_compra` / `precio_justo` / `mala_compra` según un umbral porcentual
+fijo (±10 % por defecto). Es la clasificación estable que persiste el ETL
+periódico (fase 12) en PostgreSQL y expone la API.
+
+`clasificar_y_exportar` orquesta el flujo completo del ranking CSV: lee el
+CSV evaluado, clasifica, ordena por ratio descendente (mejores oportunidades
+primero) y guarda `reports/ofertas.csv`. `scripts/clasificar_ofertas.py` es
+el entry point de CLI (wrapper fino).
 """
 
 from __future__ import annotations
@@ -30,7 +36,12 @@ OUTPUT_DEFAULT = "reports/ofertas.csv"
 
 BUENA_COMPRA = "buena_compra"
 MALA_COMPRA = "mala_compra"
+PRECIO_JUSTO = "precio_justo"
 SIN_CLASIFICAR = "sin_clasificar"
+
+#: Umbral porcentual (±10 %) de la clasificación por propiedad: si la
+#: diferencia supera el umbral en cualquier dirección se sale de "precio_justo".
+UMBRAL_PRECIO_JUSTO_DEFAULT = 0.10
 
 # Columnas del ranking de ofertas: identificación, precios, score y clasificación.
 COLUMNAS_OFERTAS = [
@@ -92,6 +103,52 @@ def clasificar_oportunidades(df: pd.DataFrame) -> pd.DataFrame:
         [BUENA_COMPRA, MALA_COMPRA],
         default=SIN_CLASIFICAR,
     )
+
+    return df
+
+
+def clasificar_por_diferencia(
+    df: pd.DataFrame,
+    *,
+    umbral: float = UMBRAL_PRECIO_JUSTO_DEFAULT,
+) -> pd.DataFrame:
+    """
+    Clasifica cada propiedad por su diferencia predicho/publicado.
+
+    Agrega `diferencia_usd` y `diferencia_porcentual` (en %) además de
+    `clasificacion` con valores `buena_compra` / `precio_justo` /
+    `mala_compra` según un umbral porcentual fijo (`umbral`, ±10 % por
+    defecto). Las propiedades sin precio publicado válido (0, faltante o no
+    finito) quedan con `diferencia_usd`/`diferencia_porcentual` NaN y
+    clasificadas como `sin_clasificar`.
+    """
+
+    df = df.copy()
+
+    publicado = pd.to_numeric(df["precio_usd"], errors="coerce")
+    predicho = pd.to_numeric(df["precio_predicho_usd"], errors="coerce")
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        diferencia_usd = predicho - publicado
+        diferencia_porcentual = ((predicho - publicado) / publicado) * 100
+
+    valido = publicado > 0
+    df["diferencia_usd"] = np.where(valido, diferencia_usd, np.nan)
+    df["diferencia_porcentual"] = np.where(valido, diferencia_porcentual, np.nan)
+
+    # np.select: las comparaciones con NaN son False -> caen en el default
+    # (precio_justo), así que los inválidos se corrigen después.
+    porcentual = df["diferencia_porcentual"].to_numpy()
+    clasificacion = np.select(
+        [
+            porcentual > umbral * 100,
+            porcentual < -umbral * 100,
+        ],
+        [BUENA_COMPRA, MALA_COMPRA],
+        default=PRECIO_JUSTO,
+    )
+
+    df["clasificacion"] = np.where(valido, clasificacion, SIN_CLASIFICAR)
 
     return df
 

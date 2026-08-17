@@ -1,0 +1,84 @@
+# ============================================================
+# Fase 12 — ETL periódico de oportunidades
+#
+# Cada 4 días a las 08:00 de Argentina (UTC-3, sin horario de
+# verano) = 11:00 UTC, y también manualmente (workflow_dispatch):
+#
+#   1. Levanta un PostgreSQL efímero (servicio del job).
+#   2. Restaura el bundle del champion desde el secret
+#      MODELO_BUNDLE_URL (zip de models/modelo_precio_propiedades/).
+#      El bundle está gitignoreado y el remote DVC es local, así que
+#      no se puede restaurar con `dvc pull` en CI.
+#   3. Ejecuta el ETL: scrapea NUEVAS publicaciones de los 54 barrios
+#      de CABA, deduplica contra PostgreSQL, predice con el champion,
+#      clasifica (buena_compra/precio_justo/mala_compra) y persiste.
+#
+# El scraping respeta los delays y el backoff del scraper para no
+# bloquear el sitio; si una corrida se corta, el progreso por segmento
+# permite reanudar en la siguiente.
+# ============================================================
+
+name: ETL Oportunidades
+
+on:
+  schedule:
+    # 08:00 ART (UTC-3) -> 11:00 UTC, cada 4 días.
+    - cron: "0 11 */4 * *"
+  workflow_dispatch:
+
+jobs:
+  etl:
+    name: ETL periódico (scrape CABA + predecir + persistir)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: realestate
+          POSTGRES_PASSWORD: realestate
+          POSTGRES_DB: real_estate
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U realestate -d real_estate"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: realestate
+      POSTGRES_PASSWORD: realestate
+      POSTGRES_DB: real_estate
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias dev
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Restaurar bundle del champion
+        env:
+          MODELO_BUNDLE_URL: ${{ secrets.MODELO_BUNDLE_URL }}
+        run: |
+          if [ -z "$MODELO_BUNDLE_URL" ]; then
+            echo "::error::Falta el secret MODELO_BUNDLE_URL con el zip de models/modelo_precio_propiedades/."
+            echo "::error::El bundle está gitignoreado y el remote DVC es local, así que solo se puede restaurar desde una URL."
+            exit 1
+          fi
+          echo "Descargando bundle del champion desde MODELO_BUNDLE_URL..."
+          curl -fsSL "$MODELO_BUNDLE_URL" -o /tmp/modelo_bundle.zip
+          mkdir -p models/modelo_precio_propiedades
+          unzip -oq /tmp/modelo_bundle.zip -d models/modelo_precio_propiedades
+          test -f models/modelo_precio_propiedades/modelo_xgboost.json
+
+      - name: ETL periódico (scrape + predecir + persistir)
+        run: python scripts/etl_oportunidades.py --todos-los-barrios
