@@ -18,12 +18,12 @@ MLflow queda para la fase 6.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 from sklearn.dummy import DummyRegressor
-from sklearn.metrics import root_mean_squared_error, r2_score
+from sklearn.metrics import r2_score, root_mean_squared_error
 from xgboost import XGBRegressor
 
 from real_estate.features.transformations import (
@@ -167,7 +167,7 @@ def mostrar_metricas(nombre: str, metricas: dict[str, float]) -> None:
     )
 
 
-def entrenar_baseline(X_train: pd.DataFrame, y_train: pd.Series) -> DummyRegressor:
+def entrenar_baseline(x_train: pd.DataFrame, y_train: pd.Series) -> DummyRegressor:
     """
     Baseline: predice siempre la mediana de `y_train`.
 
@@ -177,13 +177,13 @@ def entrenar_baseline(X_train: pd.DataFrame, y_train: pd.Series) -> DummyRegress
 
     modelo = DummyRegressor(strategy="median")
 
-    modelo.fit(X_train, y_train)
+    modelo.fit(x_train, y_train)
 
     return modelo
 
 
 def entrenar_xgboost(
-    X_train: pd.DataFrame,
+    x_train: pd.DataFrame,
     y_train: pd.Series,
     params: dict[str, object] | None = None,
     random_state: int = 42,
@@ -194,7 +194,7 @@ def entrenar_xgboost(
 
     modelo = XGBRegressor(**params, random_state=random_state, n_jobs=-1)
 
-    modelo.fit(X_train, y_train)
+    modelo.fit(x_train, y_train)
 
     return modelo
 
@@ -235,32 +235,36 @@ def entrenar_y_evaluar(
     val_proc = aplicar_preprocesamiento(val, ajustes)
     test_proc = aplicar_preprocesamiento(test, ajustes)
 
-    X_train, y_train = separar_features_target(train_proc)
-    X_val, y_val = separar_features_target(val_proc)
-    X_test, y_test = separar_features_target(test_proc)
+    x_train, y_train = separar_features_target(train_proc)
+    x_val, y_val = separar_features_target(val_proc)
+    x_test, y_test = separar_features_target(test_proc)
 
     print(
-        f"\nSplit: train {len(X_train):,} | val {len(X_val):,} | test {len(X_test):,}"
-        f"\nFeatures: {X_train.shape[1]} | Target: {TARGET_LOG}"
+        f"\nSplit: train {len(x_train):,} | val {len(x_val):,} | test {len(x_test):,}"
+        f"\nFeatures: {x_train.shape[1]} | Target: {TARGET_LOG}"
     )
 
-    modelo_baseline = entrenar_baseline(X_train, y_train)
+    modelo_baseline = entrenar_baseline(x_train, y_train)
     modelo_xgboost = entrenar_xgboost(
-        X_train,
+        x_train,
         y_train,
         params=params_xgb,
         random_state=random_state,
     )
 
-    metricas_baseline_val = calcular_metricas(y_val, modelo_baseline.predict(X_val))
-    metricas_xgboost_val = calcular_metricas(y_val, modelo_xgboost.predict(X_val))
-    metricas_xgboost_test = calcular_metricas(y_test, modelo_xgboost.predict(X_test))
+    metricas_baseline_val = calcular_metricas(y_val, modelo_baseline.predict(x_val))
+    metricas_xgboost_val = calcular_metricas(y_val, modelo_xgboost.predict(x_val))
+    metricas_xgboost_test = calcular_metricas(y_test, modelo_xgboost.predict(x_test))
 
     print("\nMétricas sobre VALIDACIÓN:")
     mostrar_metricas("baseline", metricas_baseline_val)
     mostrar_metricas("xgboost", metricas_xgboost_val)
 
-    mejor = "xgboost" if metricas_xgboost_val["rmse_log"] < metricas_baseline_val["rmse_log"] else "baseline"
+    mejor = (
+        "xgboost"
+        if metricas_xgboost_val["rmse_log"] < metricas_baseline_val["rmse_log"]
+        else "baseline"
+    )
 
     print(f"\nMejor modelo en val: {mejor}")
 

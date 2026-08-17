@@ -17,6 +17,7 @@ from real_estate.features import pipeline as pl
 from real_estate.features import transformations as tr
 from real_estate.models import entrenamiento as en
 from real_estate.models import modelos_lineales as ml
+from real_estate.models import tuning as tu
 from real_estate.tracking import experimentos as ex
 
 
@@ -173,6 +174,7 @@ class TestRegistrarResultado:
 
         rutas = [artefacto.path for artefacto in MlflowClient().list_artifacts(run_id)]
         assert "resumen_entrenamiento.json" in rutas
+        assert "feature_importances.json" in rutas
 
         ruta_json = Path(MlflowClient().download_artifacts(run_id, "resumen_entrenamiento.json"))
         resumen = json.loads(ruta_json.read_text(encoding="utf-8"))
@@ -180,6 +182,14 @@ class TestRegistrarResultado:
         assert resumen["random_state"] == 42
         assert "metricas_xgboost_test" in resumen
         assert resumen["parametros_xgboost"]["n_estimators"] == 300
+
+        # Importancia de features: una entrada por feature, pesos no negativos
+        # y ordenados de mayor a menor (fase 6).
+        ruta_imp = Path(MlflowClient().download_artifacts(run_id, "feature_importances.json"))
+        importancia = json.loads(ruta_imp.read_text(encoding="utf-8"))
+        assert len(importancia) == int(params["n_features"])
+        assert all(valor >= 0 for valor in importancia.values())
+        assert list(importancia.values()) == sorted(importancia.values(), reverse=True)
 
         # El modelo quedó versionado en el Model Registry (en MLflow 3.x vive
         # en el repositorio de modelos, no en los artefactos de la corrida).
@@ -264,6 +274,91 @@ class TestRegistrarLineales:
         ex.configurar_tracking(tracking_uri=tmp_path.as_uri())
 
         ex.registrar_lineales(resultado, train, random_state=42)
+
+        versiones = MlflowClient().search_model_versions(f"name = '{ex.MODELO_DEFAULT}'")
+        assert versiones == []
+
+
+class TestRegistrarTuning:
+    @staticmethod
+    def _tuning_pequeno() -> tu.ResultadoTuning:
+        train, val, test = _splits()
+
+        return tu.tunear_xgboost(
+            train,
+            val,
+            test,
+            metodo="grid",
+            espacio={"max_depth": [3, 4], "n_estimators": [50, 100]},
+            cv=2,
+            n_jobs=1,
+            random_state=42,
+        )
+
+    def test_devuelve_run_resumen_y_un_run_por_trial(self, tmp_path: Path) -> None:
+        train, _, _ = _splits()
+        resultado = self._tuning_pequeno()
+        ex.configurar_tracking(tracking_uri=tmp_path.as_uri())
+
+        run_id, trials = ex.registrar_tuning(resultado, train, random_state=42)
+
+        assert run_id
+        assert len(trials) == resultado.n_trials == 4
+        assert mlflow.active_run() is None
+
+    def test_loguea_params_metricas_y_artefactos(self, tmp_path: Path) -> None:
+        train, val, test = _splits()
+        resultado = self._tuning_pequeno()
+        ex.configurar_tracking(tracking_uri=tmp_path.as_uri())
+
+        run_id, trials = ex.registrar_tuning(
+            resultado,
+            train,
+            random_state=42,
+            dataset_info="sintetico",
+            split_sizes={"train": len(train), "val": len(val), "test": len(test)},
+        )
+
+        corrida = MlflowClient().get_run(run_id)
+
+        params = corrida.data.params
+        assert params["tipo_modelo"] == "xgboost"
+        assert params["metodo_tuning"] == "grid"
+        assert params["cv_folds"] == "2"
+        assert params["n_trials"] == "4"
+        assert params["dataset_info"] == "sintetico"
+        assert params["n_train"] == str(len(train))
+        assert params["n_val"] == str(len(val))
+        assert params["n_test"] == str(len(test))
+        assert "tuned_max_depth" in params
+        assert "tuned_n_estimators" in params
+
+        metricas = corrida.data.metrics
+        assert "default_val_rmse_log" in metricas
+        assert "tunedo_val_rmse_log" in metricas
+        assert "tunedo_test_r2" in metricas
+        assert metricas["mejor_puntaje_cv_rmse_log"] > 0
+
+        rutas = [artefacto.path for artefacto in MlflowClient().list_artifacts(run_id)]
+        assert "resumen_tuning.json" in rutas
+        assert "mejor_params.json" in rutas
+        assert "cv_resultados.json" in rutas
+
+        # Los runs anidados (uno por trial) loguean params y métricas de CV.
+        assert len(trials) == 4
+        for _, trial_id in trials:
+            trial = MlflowClient().get_run(trial_id)
+            assert "max_depth" in trial.data.params
+            assert "n_estimators" in trial.data.params
+            assert trial.data.metrics["cv_rmse_log"] > 0
+            assert trial.data.metrics["cv_rank"] >= 1
+
+    def test_no_versiona_en_el_model_registry(self, tmp_path: Path) -> None:
+        train, _, _ = _splits()
+        resultado = self._tuning_pequeno()
+        ex.configurar_tracking(tracking_uri=tmp_path.as_uri())
+
+        ex.registrar_tuning(resultado, train, random_state=42)
 
         versiones = MlflowClient().search_model_versions(f"name = '{ex.MODELO_DEFAULT}'")
         assert versiones == []

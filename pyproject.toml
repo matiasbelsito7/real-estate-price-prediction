@@ -110,7 +110,11 @@ exclude = [
     ".ruff_cache",
     "data",
     "mlruns",
-    "models",
+    # Anclado a la raíz: "models" sin "/" excluiría cualquier segmento de
+    # ruta llamado "models", incluyendo `src/real_estate/models/` (N806
+    # quedaba silenciado para todo el paquete). "/models" solo excluye el
+    # directorio de salida `models/` en la raíz del proyecto.
+    "/models",
 ]
 
 

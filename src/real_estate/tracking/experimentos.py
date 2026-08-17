@@ -4,7 +4,9 @@ Tracking de experimentos con MLflow (Fase 6).
 Registra parámetros, métricas, un artefacto JSON de resumen y el modelo
 XGBoost (con firma) en un experimento de MLflow, y versiona el modelo en el
 Model Registry. Para los modelos lineales (fase 4) registra una corrida por
-modelo (Lasso y Ridge) sin versionar nada en el Model Registry.
+modelo (Lasso y Ridge) sin versionar nada en el Model Registry. Para el
+tuning de XGBoost (fase 5) registra un run resumen más un run anidado por
+trial, sin versionar nada (el champion se elige en la fase 6).
 
 API pública:
 
@@ -14,7 +16,10 @@ API pública:
 3. `registrar_lineales` — una corrida por modelo lineal con params, métricas
    (val y, para el mejor, test) y pipeline con firma. Devuelve
    `[(nombre_modelo, run_id), ...]`.
-4. `finalizar_corrida` — cierra la corrida activa si la hubiera.
+4. `registrar_tuning` — un run resumen (métricas default vs tunedo, mejor
+   modelo con firma y artefactos) más un run anidado por trial de la
+   búsqueda. Devuelve `(run_id_resumen, [(trial, run_id), ...])`.
+5. `finalizar_corrida` — cierra la corrida activa si la hubiera.
 
 El módulo de modelos (`real_estate.models.entrenamiento`) se mantiene puro:
 el tracking se inyecta desde acá sin acoplarlo al entrenamiento.
@@ -33,6 +38,7 @@ from real_estate.models.entrenamiento import (
     separar_features_target,
 )
 from real_estate.models.modelos_lineales import ResultadoLineales
+from real_estate.models.tuning import ResultadoTuning
 
 #: Nombre del experimento por defecto (agrupa todas las corridas del proyecto).
 EXPERIMENTO_DEFAULT = "prediccion_precios_propiedades"
@@ -93,9 +99,10 @@ def registrar_resultado(
     Métricas: RMSE log / RMSE USD / R² del baseline y de XGBoost sobre val,
     y de XGBoost sobre test (prefijadas para no colisionar).
 
-    Artefactos: un JSON de resumen (`resumen_entrenamiento.json`) y el modelo
-    XGBoost logueado con su firma (`infer_signature`), que se registra en el
-    Model Registry para versionarlo.
+    Artefactos: un JSON de resumen (`resumen_entrenamiento.json`), la
+    importancia de features del XGBoost (`feature_importances.json`, ordenada
+    de mayor a menor peso) y el modelo XGBoost logueado con su firma
+    (`infer_signature`), que se registra en el Model Registry para versionarlo.
     """
 
     with mlflow.start_run() as corrida:
@@ -142,6 +149,20 @@ def registrar_resultado(
             "parametros_xgboost": resultado.modelo_xgboost.get_params(),
         }
         mlflow.log_dict(resumen, "resumen_entrenamiento.json")
+
+        # ---- Importancia de features (Fase 6) -----------------------------
+        # Mapea `feature_importances_` (normalizadas, suman 1) a los nombres
+        # de las features del pipeline, ordenadas de mayor a menor peso.
+        importancia = {
+            str(columna): float(valor)
+            for columna, valor in zip(
+                x_train.columns,
+                resultado.modelo_xgboost.feature_importances_,
+                strict=True,
+            )
+        }
+        importancia = dict(sorted(importancia.items(), key=lambda item: item[1], reverse=True))
+        mlflow.log_dict(importancia, "feature_importances.json")
 
         # ---- Modelo con firma + versionado --------------------------------
         firma = mlflow.models.infer_signature(x_train, y_train)
@@ -234,6 +255,112 @@ def registrar_lineales(
             runs.append((nombre, run_id))
 
     return runs
+
+
+def registrar_tuning(
+    resultado: ResultadoTuning,
+    train: pd.DataFrame,
+    random_state: int = 42,
+    dataset_info: str | None = None,
+    split_sizes: dict[str, int] | None = None,
+) -> tuple[str, list[tuple[int, str]]]:
+    """
+    Registra en MLflow la búsqueda de hiperparámetros y devuelve
+    `(run_id_resumen, [(trial, run_id_trial), ...])`.
+
+    El run resumen loguea los parámetros de la búsqueda (método, folds,
+    trials, mejor configuración), las métricas del XGBoost default vs el
+    tunedo (val y test), el mejor modelo con firma y tres artefactos:
+    `resumen_tuning.json`, `mejor_params.json` y `cv_resultados.json` (la
+    tabla de trials vía `log_table`).
+
+    Además crea un run anidado por trial (un run de MLflow por trial, según
+    el roadmap) con los parámetros del trial y sus métricas de CV (RMSE log,
+    desviación y ranking).
+
+    No se versiona nada en el Model Registry: el champion se elige y registra
+    recién en la fase 6.
+    """
+
+    train_proc = aplicar_preprocesamiento(train, resultado.ajustes)
+    x_train, y_train = separar_features_target(train_proc)
+    firma = mlflow.models.infer_signature(x_train, y_train)
+
+    with mlflow.start_run() as corrida:
+        run_id_resumen = str(corrida.info.run_id)
+
+        # ---- Params -------------------------------------------------------
+        parametros: dict[str, object] = {
+            "tipo_modelo": "xgboost",
+            "metodo_tuning": resultado.metodo,
+            "cv_folds": str(resultado.cv),
+            "n_trials": str(resultado.n_trials),
+            "random_state": str(random_state),
+            "n_features": str(x_train.shape[1]),
+            "n_train": str(x_train.shape[0]),
+        }
+        if resultado.n_iter is not None:
+            parametros["n_iter"] = str(resultado.n_iter)
+        if dataset_info is not None:
+            parametros["dataset_info"] = dataset_info
+        if split_sizes is not None:
+            for nombre, tamano in split_sizes.items():
+                parametros[f"n_{nombre}"] = str(tamano)
+        parametros.update(
+            {f"tuned_{clave}": str(valor) for clave, valor in resultado.mejor_params.items()}
+        )
+        mlflow.log_params(parametros)
+
+        # ---- Métricas -----------------------------------------------------
+        mlflow.log_metrics(_metricas_prefijadas("default_val", resultado.metricas_default_val))
+        mlflow.log_metrics(_metricas_prefijadas("tunedo_val", resultado.metricas_tunedo_val))
+        mlflow.log_metrics(_metricas_prefijadas("tunedo_test", resultado.metricas_tunedo_test))
+        mlflow.log_metric("mejor_puntaje_cv_rmse_log", resultado.mejor_puntaje_cv)
+
+        # ---- Artefactos ---------------------------------------------------
+        resumen = {
+            "metodo": resultado.metodo,
+            "cv_folds": resultado.cv,
+            "n_iter": resultado.n_iter,
+            "n_trials": resultado.n_trials,
+            "mejor_params": resultado.mejor_params,
+            "mejor_puntaje_cv_rmse_log": resultado.mejor_puntaje_cv,
+            "metricas_default_val": resultado.metricas_default_val,
+            "metricas_tunedo_val": resultado.metricas_tunedo_val,
+            "metricas_tunedo_test": resultado.metricas_tunedo_test,
+        }
+        mlflow.log_dict(resumen, "resumen_tuning.json")
+        mlflow.log_dict({"mejor_params": resultado.mejor_params}, "mejor_params.json")
+        mlflow.log_table(resultado.cv_resultados, artifact_file="cv_resultados.json")
+
+        # ---- Mejor modelo con firma (sin Model Registry) ------------------
+        mlflow.xgboost.log_model(
+            xgb_model=resultado.modelo_tunedo,
+            name="modelo_tunedo",
+            signature=firma,
+        )
+
+        # ---- Un run anidado por trial -------------------------------------
+        runs_trials: list[tuple[int, str]] = []
+        # `enumerate` da un índice entero (los trials se ordenan por ranking);
+        # `iterrows` por sí solo expondría el índice como `Hashable` para mypy.
+        for indice, (_, fila) in enumerate(resultado.cv_resultados.iterrows()):
+            with mlflow.start_run(nested=True) as trial:
+                trial_id = str(trial.info.run_id)
+
+                params_trial = {
+                    clave.removeprefix("param_"): valor
+                    for clave, valor in fila.items()
+                    if isinstance(clave, str) and clave.startswith("param_")
+                }
+                mlflow.log_params({clave: str(valor) for clave, valor in params_trial.items()})
+                mlflow.log_metric("cv_rmse_log", float(fila["cv_rmse_log"]))
+                mlflow.log_metric("cv_rmse_log_std", float(fila["cv_rmse_log_std"]))
+                mlflow.log_metric("cv_rank", int(fila["rank_test_score"]))
+
+                runs_trials.append((indice, trial_id))
+
+    return run_id_resumen, runs_trials
 
 
 def finalizar_corrida() -> None:

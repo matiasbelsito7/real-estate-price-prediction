@@ -75,7 +75,7 @@ def crear_pipeline_lineal(estimador: Lasso | Ridge) -> PipelineLineal:
 
 
 def entrenar_lasso(
-    X_train: pd.DataFrame,
+    x_train: pd.DataFrame,
     y_train: pd.Series,
     alpha: float = ALPHA_DEFAULT,
     random_state: int = 42,
@@ -86,13 +86,13 @@ def entrenar_lasso(
         Lasso(alpha=alpha, max_iter=MAX_ITER_DEFAULT, random_state=random_state)
     )
 
-    modelo.fit(X_train, y_train)
+    modelo.fit(x_train, y_train)
 
     return modelo
 
 
 def entrenar_ridge(
-    X_train: pd.DataFrame,
+    x_train: pd.DataFrame,
     y_train: pd.Series,
     alpha: float = ALPHA_DEFAULT,
     random_state: int = 42,
@@ -103,7 +103,7 @@ def entrenar_ridge(
         Ridge(alpha=alpha, max_iter=MAX_ITER_DEFAULT, random_state=random_state)
     )
 
-    modelo.fit(X_train, y_train)
+    modelo.fit(x_train, y_train)
 
     return modelo
 
@@ -144,42 +144,38 @@ def entrenar_y_evaluar_lineales(
     val_proc = aplicar_preprocesamiento(val, ajustes)
     test_proc = aplicar_preprocesamiento(test, ajustes)
 
-    X_train, y_train = separar_features_target(train_proc)
-    X_val, y_val = separar_features_target(val_proc)
-    X_test, y_test = separar_features_target(test_proc)
+    x_train, y_train = separar_features_target(train_proc)
+    x_val, y_val = separar_features_target(val_proc)
+    x_test, y_test = separar_features_target(test_proc)
 
     print(
-        f"\nSplit: train {len(X_train):,} | val {len(X_val):,} | test {len(X_test):,}"
-        f"\nFeatures: {X_train.shape[1]} | Target: {TARGET_LOG} | Escalado: StandardScaler"
+        f"\nSplit: train {len(x_train):,} | val {len(x_val):,} | test {len(x_test):,}"
+        f"\nFeatures: {x_train.shape[1]} | Target: {TARGET_LOG} | Escalado: StandardScaler"
     )
 
     modelo_lasso = entrenar_lasso(
-        X_train,
+        x_train,
         y_train,
         alpha=alpha_lasso,
         random_state=random_state,
     )
     modelo_ridge = entrenar_ridge(
-        X_train,
+        x_train,
         y_train,
         alpha=alpha_ridge,
         random_state=random_state,
     )
 
-    metricas_lasso_val = calcular_metricas(y_val, modelo_lasso.predict(X_val))
-    metricas_ridge_val = calcular_metricas(y_val, modelo_ridge.predict(X_val))
+    metricas_lasso_val = calcular_metricas(y_val, modelo_lasso.predict(x_val))
+    metricas_ridge_val = calcular_metricas(y_val, modelo_ridge.predict(x_val))
 
     print("\nMétricas sobre VALIDACIÓN:")
     mostrar_metricas("lasso", metricas_lasso_val)
     mostrar_metricas("ridge", metricas_ridge_val)
 
-    mejor = (
-        "lasso"
-        if metricas_lasso_val["rmse_log"] <= metricas_ridge_val["rmse_log"]
-        else "ridge"
-    )
+    mejor = "lasso" if metricas_lasso_val["rmse_log"] <= metricas_ridge_val["rmse_log"] else "ridge"
     modelo_mejor = modelo_lasso if mejor == "lasso" else modelo_ridge
-    metricas_mejor_test = calcular_metricas(y_test, modelo_mejor.predict(X_test))
+    metricas_mejor_test = calcular_metricas(y_test, modelo_mejor.predict(x_test))
 
     print(f"\nMejor modelo en val: {mejor}")
     print("\nMétricas sobre TEST (modelo final):")

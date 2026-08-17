@@ -163,6 +163,22 @@ relativo.
   `colsample_bytree`, `min_child_weight`, `gamma`, `reg_alpha`, `reg_lambda`.
 - Un run de MLflow por trial; al final se compara y el mejor se registra como
   campeón.
+- **Implementado ✔:** core en `src/real_estate/models/tuning.py`
+  (`ESPACIO_HIPERPARAMETROS` de 9 parámetros, `GRID_REDUCIDO` de 8
+  combinaciones para `grid`, `tunear_xgboost` con CV interna sobre train sin
+  fuga y comparación contra el default), entry point `scripts/train_tuning.py`
+  (CLI `--metodo {grid,random}`, `--n-iter`, `--cv`, `--n-jobs`,
+  `--no-tracking`), tracking por trial en `registrar_tuning` (run resumen + un
+  run anidado por trial, sin Model Registry — el champion se elige en la fase
+  6), tests `tests/unit/test_tuning.py`, target `make tuning` y entrada en
+  `docs/architecture.md`.
+- **Resultado sobre el dataset real (`--metodo grid`):** el mejor combo
+  (colsample_bytree 0.8, lr 0.05, max_depth 3, min_child_weight 3, n_estimators
+  300, subsample 0.8) logra CV RMSE log 0.2886 y queda **dentro del ruido del
+  default**: test RMSE log 0.3020 vs 0.3040 (mejoría marginal ~0.7 %), val
+  0.2825 vs 0.2718 (ligeramente peor). Conclusión: el default ya era casi
+  óptimo; el champion se decide en la fase 6 entre las corridas de
+  entrenamiento (`registrar_resultado`), no entre las de tuning.
 
 ---
 
@@ -175,6 +191,20 @@ relativo.
 - Comparación de runs para decidir el modelo de producción (champion).
 - Reutiliza `tracking/experimentos.py`; se agrega el registro del champion al
   exportar el modelo de serving.
+- **Implementado ✔:**
+  - Artefacto de importancia de features en `registrar_resultado`
+    (`feature_importances.json`, ordenada de mayor a menor peso).
+  - Comparación de runs y elección de champion en
+    `src/real_estate/tracking/comparacion.py` (`comparar_runs` →
+    `elegir_champion`, métrica default `xgboost_test_rmse_log`), con CLI
+    `scripts/comparar_runs.py` y target `make compare`. Sobre el dataset real
+    el champion es la corrida de XGBoost default (test RMSE log 0.3040).
+  - Registro del champion al exportar el serving: `scripts/exportar_modelo.py`
+    reentrena, registra la corrida (`registrar_resultado`) y la versiona en el
+    Model Registry (opt-out con `--no-tracking`).
+  - Tests `tests/unit/test_comparacion.py` (7 tests) + ampliación de
+    `tests/unit/test_tracking.py` (artefacto de importancia) y entradas en
+    `docs/architecture.md`.
 
 ---
 
@@ -187,8 +217,13 @@ relativo.
 3. **Fases 4 + 5** (modelos lineales + tuning) → en paralelo, ambos dependen
    solo del pipeline existente. **Fase 4 ✔ COMPLETADA** (modelos_lineales.py +
    train_lineales.py + registrar_lineales + 12 tests + make train-lineales +
-   docs). **Fase 5 pendiente** (tuning de XGBoost).
-4. **Fase 6** (MLflow) → transversal, se va haciendo en cada fase.
+   docs). **Fase 5 ✔ COMPLETADA** (tuning.py + train_tuning.py +
+   registrar_tuning + test_tuning.py + make tuning + docs; grid sobre el
+   dataset real ejecutado: el default ya era casi óptimo).
+4. **Fase 6** (MLflow integral) → transversal, se fue haciendo en cada fase.
+   **✔ COMPLETADA** (comparacion.py + comparar_runs.py + make compare +
+   feature_importances.json + champion al exportar el serving +
+   test_comparacion.py + docs).
 
 ## 11. Pendientes abiertos
 

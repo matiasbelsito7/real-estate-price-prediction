@@ -6,6 +6,7 @@ Uso:
     python scripts/exportar_modelo.py
     python scripts/exportar_modelo.py --input data/processed/propiedades_argenprop_curado.csv
     python scripts/exportar_modelo.py --output models/modelo_precio_propiedades --random-state 42
+    python scripts/exportar_modelo.py --no-tracking
 
 Etapas:
     1. Carga del dataset curado, selección de columnas y target logarítmico.
@@ -13,10 +14,15 @@ Etapas:
     3. Preprocesamiento ajustado solo sobre train (sin fuga) y XGBoost.
     4. Guarda el bundle de serving con `real_estate.serving.persistencia`:
        modelo XGBoost, preprocesamiento, orden de features y metadata.
+    5. Tracking con MLflow: registra la corrida con `registrar_resultado`
+       (params, métricas, importancia de features y el modelo con firma),
+       versionando el champion en el Model Registry.
 
 El bundle resultante lo consume el servicio FastAPI (fase 10) vía
-`cargar_bundle`. No depende de MLflow: el modelo se serializa con el formato
-nativo de xgboost.
+`cargar_bundle`. El modelo se serializa con el formato nativo de xgboost; el
+tracking se puede desactivar con `--no-tracking` (útil para pruebas). El
+tracking URI respeta `MLFLOW_TRACKING_URI` si está definido; si no, usa el
+store local `mlruns/`.
 """
 
 import argparse
@@ -43,6 +49,11 @@ from real_estate.models.entrenamiento import (  # noqa: E402
     separar_features_target,
 )
 from real_estate.serving.persistencia import guardar_bundle  # noqa: E402
+from real_estate.tracking import (  # noqa: E402
+    MODELO_DEFAULT,
+    configurar_tracking,
+    registrar_resultado,
+)
 
 OUTPUT_DEFAULT = Path("models/modelo_precio_propiedades")
 
@@ -51,6 +62,7 @@ def exportar_modelo(
     input_file: str | Path,
     output_dir: str | Path = OUTPUT_DEFAULT,
     random_state: int = 42,
+    no_tracking: bool = False,
 ) -> Path:
     """Entrena el modelo final y guarda el bundle de serving en `output_dir`."""
 
@@ -67,7 +79,22 @@ def exportar_modelo(
 
     train, val, test = dividir_train_val_test(df, random_state=random_state)
 
+    if not no_tracking:
+        experimento = configurar_tracking()
+        print(f"\nTracking MLflow: experimento '{experimento}'")
+
     resultado = entrenar_y_evaluar(train, val, test, random_state=random_state)
+
+    if not no_tracking:
+        run_id, version = registrar_resultado(
+            resultado,
+            train,
+            random_state=random_state,
+            dataset_info=str(input_path),
+            split_sizes={"train": len(train), "val": len(val), "test": len(test)},
+        )
+        print(f"\nChampion registrado en el Model Registry: '{MODELO_DEFAULT}' versión {version}")
+        print(f"Run MLflow: {run_id}")
 
     # Orden de las features que el modelo espera: el de la matriz preprocesada.
     train_proc = aplicar_preprocesamiento(train, resultado.ajustes)
@@ -138,12 +165,18 @@ def main() -> None:
         default=42,
         help="Semilla para el split y el entrenamiento (default: 42)",
     )
+    parser.add_argument(
+        "--no-tracking",
+        action="store_true",
+        help="Desactiva el tracking con MLflow (por defecto está activo)",
+    )
     args = parser.parse_args()
 
     exportar_modelo(
         input_file=args.input,
         output_dir=args.output,
         random_state=args.random_state,
+        no_tracking=args.no_tracking,
     )
 
 
