@@ -1048,11 +1048,21 @@ validación real es de la definición del pipeline. Se dispara en push/PR a
 `etl_oportunidades.yml` (`.github/workflows/etl_oportunidades.yml`, fase 12):
 automatiza el ETL periódico de oportunidades. Se dispara con cron
 `0 11 */4 * *` (cada 4 días a las 08:00 de Argentina; el proyecto no usa DST)
-y manualmente (`workflow_dispatch`). Levanta un servicio PostgreSQL efímero,
-restaura el bundle del champion desde el secret `MODELO_BUNDLE_URL` (error duro
-si falta: el bundle es gitignoreado y el remote DVC es local, no disponible en
-CI) y ejecuta `python scripts/etl_oportunidades.py --todos-los-barrios` (CABA),
-que deduplica contra la base, predice, clasifica y persiste las oportunidades.
+y manualmente (`workflow_dispatch`). Restaura el bundle del champion desde el
+secret `MODELO_BUNDLE_URL` (error duro si falta: el bundle es gitignoreado y el
+remote DVC es local, no disponible en CI) y ejecuta
+`python scripts/etl_oportunidades.py --todos-los-barrios` (CABA), que deduplica
+contra la base, predice, clasifica y persiste las oportunidades.
+
+**Base de datos:** por default el job levanta un PostgreSQL efímero (servicio
+`postgres`, destruido al terminar la corrida) y las variables `POSTGRES_*`
+caen a sus valores (host `localhost`, etc.). Para persistir entre corridas se
+puede apuntar a una base externa/durable definiendo los secrets
+`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD` y
+`POSTGRES_DB`: cada secret tiene prioridad sobre el default del servicio
+efímero (expresiones `${{ secrets.X || default }}`). El servicio efímero se
+levanta igual (no se puede condicionar en `services:`), pero queda sin uso si
+hay base externa configurada; un paso diagnóstico imprime qué modo está activo.
 
 ### 9.13 Datos
 

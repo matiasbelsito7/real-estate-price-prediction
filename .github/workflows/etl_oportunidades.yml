@@ -4,7 +4,11 @@
 # Cada 4 días a las 08:00 de Argentina (UTC-3, sin horario de
 # verano) = 11:00 UTC, y también manualmente (workflow_dispatch):
 #
-#   1. Levanta un PostgreSQL efímero (servicio del job).
+#   1. Levanta un PostgreSQL efímero (servicio del job) que se usa por
+#      default. Para persistir entre corridas se puede apuntar a una base
+#      externa definiendo los secrets POSTGRES_HOST, POSTGRES_PORT,
+#      POSTGRES_USER, POSTGRES_PASSWORD y POSTGRES_DB: cada uno tiene
+#      prioridad sobre el default del servicio efímero.
 #   2. Restaura el bundle del champion desde el secret
 #      MODELO_BUNDLE_URL (zip de models/modelo_precio_propiedades/).
 #      El bundle está gitignoreado y el remote DVC es local, así que
@@ -32,6 +36,9 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
+      # PostgreSQL efímero usado por default cuando no se configuran los
+      # secrets POSTGRES_* (el servicio no se puede condicionar, así que se
+      # levanta siempre; si hay base externa configurada queda sin uso).
       postgres:
         image: postgres:16-alpine
         env:
@@ -47,11 +54,13 @@ jobs:
           --health-retries 5
 
     env:
-      POSTGRES_HOST: localhost
-      POSTGRES_PORT: 5432
-      POSTGRES_USER: realestate
-      POSTGRES_PASSWORD: realestate
-      POSTGRES_DB: real_estate
+      # Cada variable cae al default del servicio efímero salvo que exista
+      # el secret POSTGRES_* correspondiente (base externa/durable).
+      POSTGRES_HOST: ${{ secrets.POSTGRES_HOST || 'localhost' }}
+      POSTGRES_PORT: ${{ secrets.POSTGRES_PORT || '5432' }}
+      POSTGRES_USER: ${{ secrets.POSTGRES_USER || 'realestate' }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD || 'realestate' }}
+      POSTGRES_DB: ${{ secrets.POSTGRES_DB || 'real_estate' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -79,6 +88,14 @@ jobs:
           mkdir -p models/modelo_precio_propiedades
           unzip -oq /tmp/modelo_bundle.zip -d models/modelo_precio_propiedades
           test -f models/modelo_precio_propiedades/modelo_xgboost.json
+
+      - name: Mostrar modo de base de datos
+        run: |
+          if [ "$POSTGRES_HOST" = "localhost" ]; then
+            echo "Base: PostgreSQL efímero del servicio (la base no persiste entre corridas)."
+          else
+            echo "Base: PostgreSQL externo en $POSTGRES_HOST:$POSTGRES_PORT (db=$POSTGRES_DB, user=$POSTGRES_USER)."
+          fi
 
       - name: ETL periódico (scrape + predecir + persistir)
         run: python scripts/etl_oportunidades.py --todos-los-barrios
