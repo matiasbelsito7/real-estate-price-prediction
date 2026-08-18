@@ -65,7 +65,11 @@ data/external/
 # ML artifacts
 # ============================================================
 
-models/
+# Se excluyen los modelos salvo el bundle de serving: la imagen es
+# self-contained y lo hornea en build (fase 13 CD), así que tiene que
+# estar en el contexto.
+models/*
+!models/modelo_precio_propiedades
 mlruns/
 
 
@@ -90,3 +94,4 @@ docs/
 *.log
 *.tmp
 *.temp
+tmp/

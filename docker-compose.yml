@@ -2,9 +2,10 @@
 # Fases 11 y 12 — Docker
 # Orquestación del servicio de predicción + PostgreSQL.
 #
-# El bundle de serving (models/modelo_precio_propiedades/) se monta
-# como volumen de solo lectura: es un artefacto entrenado gitignoreado,
-# no parte de la imagen. Antes de `docker compose up` hay que ejecutar
+# Desde la fase 13 la imagen es self-contained (el bundle de serving se
+# hornea en build), pero igual se monta el bundle como volumen de solo
+# lectura: permite iterar localmente sin rebuild (sobrescribe al
+# horneado). Antes de `docker compose build` hay que ejecutar
 # `make export-model`.
 #
 # La API espera la base PostgreSQL (servicio `postgres`) para exponer

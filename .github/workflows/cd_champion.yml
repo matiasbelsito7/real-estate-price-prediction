@@ -1,0 +1,135 @@
+# ============================================================
+# Fase 13 — CD del champion
+#
+# Se dispara cuando cambia el champion: push de
+# models/champion_actual.json, el fingerprint determinístico que deja
+# scripts/publicar_champion.py. También se puede disparar a mano con
+# workflow_dispatch (redeploya el champion actual).
+#
+# Alternativas al disparador evaluadas (documentadas en
+# docs/architecture.md §9.13):
+#   - push de models/champion_actual.json  -> ELEGIDO: event-driven,
+#     sin polling, sin tokens extra; el fingerprint solo cambia si el
+#     champion cambió de verdad.
+#   - tag de git por versión de modelo      -> requiere crear un tag por
+#     versión (un paso más) y mezcla el versionado de código con el de
+#     modelos.
+#   - cron que compara contra el asset      -> polling con latencia de
+#     hasta N días; no es event-driven.
+#   - repository_dispatch / workflow_dispatch manual -> el manual queda
+#     habilitado; el repository_dispatch exigiría un PAT en el script
+#     de publicación.
+#
+# El job:
+#   1. Restaura el bundle del champion desde el asset_url que deja el
+#      fingerprint (releases de GitHub; misma URL estable entre
+#      versiones porque `publicar_champion.py` reusa tag + nombre).
+#   2. Smoke test: el bundle restaurado carga y predice, y su
+#      tipo_modelo coincide con el fingerprint.
+#   3. Construye la imagen self-contained de la API (el Dockerfile
+#      hornea el bundle; ver .dockerignore) y la pushea a GHCR con
+#      `latest` y la versión del modelo (xgboost-YYYY-MM-DD).
+# ============================================================
+
+name: CD Champion
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - models/champion_actual.json
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Publicar imagen del champion
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias dev
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Leer fingerprint del champion
+        id: champion
+        run: |
+          MODELO_VERSION=$(python -c "import json; print(json.load(open('models/champion_actual.json'))['modelo_version'])")
+          ASSET_URL=$(python -c "import json; print(json.load(open('models/champion_actual.json'))['asset_url'])")
+          echo "modelo_version=$MODELO_VERSION" >> "$GITHUB_OUTPUT"
+          echo "asset_url=$ASSET_URL" >> "$GITHUB_OUTPUT"
+          echo "Champion detectado: $MODELO_VERSION"
+
+      - name: Restaurar bundle desde el asset del fingerprint
+        run: |
+          curl -fsSL "${{ steps.champion.outputs.asset_url }}" -o /tmp/modelo_bundle.zip
+          mkdir -p models/modelo_precio_propiedades
+          unzip -oq /tmp/modelo_bundle.zip -d models/modelo_precio_propiedades
+          test -f models/modelo_precio_propiedades/modelo_xgboost.json
+
+      - name: Smoke test (el bundle restaurado carga y predice)
+        run: |
+          python - <<'EOF'
+          import json
+
+          import numpy as np
+          import pandas as pd
+
+          from real_estate.serving.persistencia import cargar_bundle
+
+          with open("models/champion_actual.json", encoding="utf-8") as f:
+              fp = json.load(f)
+
+          modelo = cargar_bundle("models/modelo_precio_propiedades")
+          assert modelo.metadata["tipo_modelo"] == fp["tipo_modelo"], (
+              "el bundle restaurado no corresponde al fingerprint"
+          )
+
+          fila = {
+              "tipo_propiedad": "departamento",
+              "barrio": "Palermo",
+              "superficie_cubierta": 120.0,
+              "ambientes": 4,
+              "dormitorios": 3,
+              "banos": 2,
+              "antiguedad": 10,
+              "expensas_usd": 150.0,
+              "superficie_cubierta_informado": 1,
+              "ambientes_informado": 1,
+              "dormitorios_informado": 1,
+              "banos_informado": 1,
+              "antiguedad_informado": 1,
+              "expensas_informado": 1,
+          }
+          pred = float(modelo.predecir_usd(pd.DataFrame([fila]))[0])
+          assert np.isfinite(pred) and pred > 0, f"predicción inválida: {pred}"
+          print(f"OK: champion {fp['modelo_version']} carga y predice ${pred:,.0f}")
+          EOF
+
+      - name: Construir imagen self-contained (bundle horneado)
+        run: |
+          IMAGEN="ghcr.io/${{ github.repository }}-api"
+          docker build \
+            -t "$IMAGEN:latest" \
+            -t "$IMAGEN:${{ steps.champion.outputs.modelo_version }}" \
+            .
+
+      - name: Publicar imagen en GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          IMAGEN="ghcr.io/${{ github.repository }}-api"
+          docker push "$IMAGEN:latest"
+          docker push "$IMAGEN:${{ steps.champion.outputs.modelo_version }}"

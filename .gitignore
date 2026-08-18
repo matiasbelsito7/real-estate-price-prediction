@@ -83,6 +83,8 @@ dvcstore/
 
 models/*
 !models/.gitkeep
+# Fingerprint del champion que dispara el CD (fase 13): se versiona a propósito
+!models/champion_actual.json
 
 # ============================================================
 # MLflow
@@ -122,3 +124,5 @@ dist/
 
 *.tmp
 *.temp
+# Zips y archivos temporales de publicación (scripts/publicar_champion.py)
+tmp/

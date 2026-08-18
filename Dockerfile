@@ -7,10 +7,14 @@
 #      (requirements-api.txt) e instala el paquete real_estate.
 #   2. `runtime`: copia solo el venv y el código necesario.
 #
-# El bundle de serving (models/modelo_precio_propiedades/) NO se
-# copia a la imagen: es un artefacto entrenado gitignoreado, por eso
-# docker-compose.yml lo monta como volumen de solo lectura. Antes de
-# `docker compose up` hay que ejecutar `make export-model`.
+# La imagen es self-contained: el bundle de serving
+# (models/modelo_precio_propiedades/) se HORNEA en la imagen y no se
+# depende de montar un volumen (así lo usa el CD de la fase 13). El
+# `.dockerignore` re-incluye el bundle en el contexto; si falta,
+# `COPY` falla. Antes de `docker compose build` local hay que
+# ejecutar `make export-model`. docker-compose.yml igual monta el
+# bundle como volumen de solo lectura para iterar localmente sin
+# rebuild (sobrescribe al horneado).
 # ============================================================
 
 # ============================================================
@@ -51,6 +55,10 @@ WORKDIR /app
 
 # Copia el venv del stage build (contiene el paquete real_estate instalado).
 COPY --from=build /opt/venv /opt/venv
+
+# Hornea el bundle de serving: la imagen corre con el champion que había
+# en el contexto al construirla (fase 13 CD).
+COPY models/modelo_precio_propiedades/ /app/models/modelo_precio_propiedades/
 
 EXPOSE 8000
 

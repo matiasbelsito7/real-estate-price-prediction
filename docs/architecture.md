@@ -859,6 +859,7 @@ subestima las altas (-15.8 % por encima de $235.000). Figuras
 | `train_tuning.py` | ✔ implementado (roadmap fase 5) | Orquestar el tuning de XGBoost: carga del curado, split reproducible, búsqueda `grid`/`random` con CV interna sobre train sin fuga y tracking con un run resumen + un run por trial (usa `src/real_estate/models` y `src/real_estate/tracking`; CLI `--input`, `--random-state`, `--metodo {grid,random}`, `--n-iter`, `--cv`, `--n-jobs` y `--no-tracking`) |
 | `comparar_runs.py` | ✔ implementado (roadmap fase 6) | Comparar las corridas de MLflow del experimento y elegir el champion: tabla con la métrica de interés ordenada de mejor a peor + corrida ganadora (usa `src/real_estate/tracking`; CLI `--experimento`, `--metrica`, `--max-runs`) |
 | `exportar_modelo.py` | ✔ implementado (fase 10) | Entrenar sobre el curado y exportar el bundle de serving a `models/modelo_precio_propiedades/`; si el tracking está activo, registra la corrida del champion (`registrar_resultado`) y la versiona en el Model Registry (usa `src/real_estate/serving` y `src/real_estate/tracking`; CLI `--input`, `--output`, `--random-state` y `--no-tracking`) |
+| `publicar_champion.py` | ✔ implementado (fase 13) | Publicar el bundle del champion en GitHub Releases y dejar el fingerprint `models/champion_actual.json` que dispara el CD: deriva `usuario/repo` desde `git remote get-url origin`, comprime el bundle (`crear_zip`), sube/reemplaza el asset con `gh release upload --clobber` (tag y nombre estables → la URL del asset no cambia entre versiones) y escribe un fingerprint **determinístico** (sin marcas de tiempo; si el champion no cambió, el archivo no cambia y no se re-dispara el CD). `--no-upload` solo regenera el fingerprint (dry run); `--commit`/`--push` commitean y pushean el fingerprint (ignorados con `--no-upload`) |
 | `evaluar_nuevas.py` | ✔ implementado (roadmap fase 2) | Predecir el precio de las nuevas publicaciones con el bundle de serving: cura el CSV de nuevas en memoria (`curar_dataset`), carga el modelo (`cargar_bundle`) y guarda `data/processed/propiedades_nuevas_evaluadas.csv` con `precio_predicho_usd` y `fecha_prediccion` (usa `src/real_estate/serving`; CLI `--input`, `--output`, `--modelo`) |
 | `clasificar_ofertas.py` | ✔ implementado (roadmap fase 3) | Clasificar cada publicación evaluada como **buena/mala compra** (ratio `precio_predicho_usd / precio_usd` y zona neutra `1 ± std` del lote) y guardar el ranking de oportunidades `reports/ofertas.csv` ordenado por ratio descendente (usa `src/real_estate/serving`; CLI `--input`, `--output`; pensado para correrse después de `evaluar_nuevas.py` en el mismo cron) |
 | `etl_oportunidades.py` | ✔ implementado (fase 12) | Orquestar el ETL periódico de oportunidades: grupo `scrape` (mismo motor de `scrape_nuevas.py` con `revision_periodica=True`, CABA únicamente; flags `--todos-los-barrios`, `--barrios`, `--max-paginas`, `--tipo`, `--html-debug`, `--delay-min/max`, `--progreso`) y grupo `etl` (predice con el bundle del champion, clasifica por propiedad y persiste en PostgreSQL; flags `--input`, `--output`, `--modelo`). Al final escribe `reports/oportunidades_nuevas.csv` con `precio_predicho_usd`, `diferencia_usd`, `diferencia_porcentual` y `clasificacion` (usa `src/real_estate/serving/etl_oportunidades.py` + `src/real_estate/persistencia`) |
@@ -867,7 +868,8 @@ subestima las altas (-15.8 % por encima de $235.000). Figuras
 
 **Relación con MakeFile:** `make scrape`, `make curate`, `make features`,
 `make train`, `make train-lineales`, `make tuning`, `make compare`,
-`make export-model`, `make serve` y `make etl` ya existen (aceptan
+`make export-model`, `make publicar-champion`, `make serve` y `make etl` ya
+existen (aceptan
 `ARGS="..."`). A medida que existan los demás scripts, se agregan targets
 `make evaluate`, `make explain`.
 
@@ -902,6 +904,7 @@ Nota: los notebooks se ejecutan headless con
 | `tests/unit/test_serving.py` | Fase 10: round-trip `guardar_bundle`/`cargar_bundle` (archivos escritos, `preprocesamiento.json` válido), `ModeloPrediccion` (USD = `exp(log)`, equivale al pipeline de entrenamiento, invariante al reorden de columnas, categoría desconocida → `CODIGO_DESCONOCIDO`, NaN imputado con la mediana del bundle) — 9 tests | ✔ |
 | `tests/unit/test_clasificacion.py` | Roadmap fase 3 + fase 12: cálculo del ratio predicho/publicado (incluidos precios publicados inválidos → NaN/sin clasificar), zona neutra `1 ± std` del lote (ddof=1) en las tres categorías, caso degenerado de std (1 ratio → compara contra 1), ratio inválido que no contamina la std, flujo `clasificar_y_exportar` (ranking ordenado por ratio descendente, crea directorio padre, `FileNotFoundError`); fase 12: `clasificar_por_diferencia` (umbral ±10 % configurable, diferencias en USD y porcentual, precios inválidos → sin clasificar) — 21 tests | ✔ |
 | `tests/unit/test_repositorio.py` | Fase 12: `upsert_oportunidades` (inserta, actualiza por `id` sin duplicar, traduce `NaN`/`inf` a `NULL`, descarta filas sin `id` válido, devuelve cantidad, idempotencia), `ids_procesados`, `listar_oportunidades` (orden por diferencia porcentual descendente, filtros por clasificación/barrio, paginado) y `obtener_oportunidad` (existe / `None`) — 11 tests | ✔ |
+| `tests/unit/test_publicar_champion.py` | Fase 13: `_repo_remoto` (URLs https/ssh, `usuario/repo` directo, host no-GitHub → `ValueError`), `modelo_version_desde_metadata` (`xgboost-YYYY-MM-DD`), `crear_zip` (archivos en la raíz, falta obligatorio → `FileNotFoundError`), `fingerprint_desde_metadata` (determinístico, cambia con la versión), `publicar_champion` (genera el fingerprint con `--no-upload`, no re-publica sin cambios, ejecuta `gh release upload --clobber`, usa `git add/commit/push` y los ignora con `--no-upload`) — 15 tests | ✔ |
 | `tests/integration/test_pipeline.py` | `curar_csv` end-to-end sobre CSV sintético (columnas del scraper), con tipo de cambio mockeado: conversión USD/ARS, indicadores `*_informado`, conversión de tipos textuales, `FileNotFoundError` | ✔ |
 | `tests/integration/test_evaluar_nuevas.py` | Roadmap fase 2: `evaluar_nuevas` end-to-end sobre CSV sintético de nuevas (bundle entrenado sobre datos sintéticos en `tmp_path`, tipo de cambio mockeado): columnas de salida, predicciones positivas y finitas, conserva `precio_usd` publicado (USD/ARS), `fecha_prediccion` = hoy, `FileNotFoundError` — 6 tests | ✔ |
 | `tests/integration/test_api.py` | Fases 10 y 12: `/health` (200, estado/modelo/versión/métricas del bundle), `/predict` (precio razonable y finito, `log` consistente, estable ante reorden del payload, indicadores `*_informado` derivados, imputación de faltantes, categoría desconocida, 422 con campos faltantes / indicador fuera de rango / valor negativo), arranque falla sin bundle; `/oportunidades` y `/oportunidades/{id}` (listado ordenado por diferencia porcentual, filtros por clasificación/barrio, paginado, 422 con `limit` inválido, 404 con id inexistente, 503 con base inalcanzable mientras `/health` sigue en 200) — 19 tests | ✔ |
@@ -1064,6 +1067,35 @@ efímero (expresiones `${{ secrets.X || default }}`). El servicio efímero se
 levanta igual (no se puede condicionar en `services:`), pero queda sin uso si
 hay base externa configurada; un paso diagnóstico imprime qué modo está activo.
 
+`cd_champion.yml` (`.github/workflows/cd_champion.yml`, fase 13): **CD del
+champion**. Se dispara cuando cambia el champion, es decir, en push de
+`models/champion_actual.json` (el fingerprint determinístico que deja
+`scripts/publicar_champion.py`) a `main`, y también manualmente con
+`workflow_dispatch` (redeploya el champion actual). El job restaura el bundle
+desde el `asset_url` que deja el fingerprint (release estable en GitHub),
+hace un smoke test (el bundle restaurado carga, predice y su `tipo_modelo`
+coincide con el fingerprint) y construye + pushea la imagen self-contained de
+la API a GHCR con `latest` y la versión del modelo (`xgboost-YYYY-MM-DD`).
+Usa `permissions: contents: read, packages: write`, así que el push a GHCR
+funciona con el `GITHUB_TOKEN` default (sin secrets nuevos).
+
+**Alternativas de disparador evaluadas** (fase 13): el elegido es el push del
+fingerprint, porque es event-driven (sin polling), no requiere tokens extra y
+el fingerprint es determinístico (solo cambia si el champion cambió de verdad).
+Se descartaron: tag de git por versión de modelo (mezcla el versionado de
+código con el de modelos y agrega un paso manual), cron que compara contra el
+asset (polling con latencia de hasta N días), y `repository_dispatch` (exigiría
+un PAT en el script de publicación). El `workflow_dispatch` manual queda
+habilitado como red de seguridad.
+
+**Flujo de publicación del champion:** después de `make export-model`,
+`scripts/publicar_champion.py` (también `make publicar-champion`) compara el
+fingerprint calculado con el existente (si es idéntico, no re-publica: no
+re-dispara el CD), sube el bundle zip a una release estable con
+`gh release upload <tag> <zip> --clobber` (URL fija entre versiones) y escribe
+`models/champion_actual.json`. El commit + push de ese fingerprint es lo que
+dispara el CD.
+
 ### 9.13 Datos
 
 | Ruta | Contenido | Estado |
@@ -1078,7 +1110,7 @@ hay base externa configurada; un paso diagnóstico imprime qué modo está activ
 
 | Ruta | Estado | Nota |
 |---|---|---|
-| `models/` | ✔ en uso (fase 10) | Bundle de serving `modelo_precio_propiedades/` (gitignored; se regenera con `make export-model`) |
+| `models/` | ✔ en uso (fase 13) | Bundle de serving `modelo_precio_propiedades/` (gitignored; se regenera con `make export-model`) + fingerprint `champion_actual.json` (versionado a propósito; su push dispara el CD, fase 13) |
 | `reports/figures/` | ✔ en uso | Figuras SHAP del notebook 05 (gitignored; se regeneran con el notebook) |
 | `reports/metrics/` | 🏗 vacía | Métricas de evaluación |
 | `mlruns/` | ✔ en uso | Store local de MLflow (experimentos, corridas y repositorio de modelos; gitignored) |
@@ -1151,6 +1183,9 @@ SQLite en memoria; el único punto real es PostgreSQL.
 - [x] API de oportunidades sobre PostgreSQL (fase 12: `GET /oportunidades` + `GET /oportunidades/{id}`, 503 si la base no está disponible)
 - [x] Workflow de automatización del ETL (fase 12: `.github/workflows/etl_oportunidades.yml`, cron cada 4 días 08:00 ART + `workflow_dispatch`)
 - [x] PostgreSQL integrado a Docker (fase 12: servicio `postgres` en `docker-compose.yml` + `POSTGRES_*` en la API)
+- [x] Publicación del champion + fingerprint determinístico (fase 13: `scripts/publicar_champion.py` + `make publicar-champion`; escribe `models/champion_actual.json` y sube el bundle a una release estable)
+- [x] CD del champion (fase 13: `.github/workflows/cd_champion.yml` — dispara en push del fingerprint, restaura el bundle, smoke test y push de la imagen self-contained a GHCR; `workflow_dispatch` manual como red de seguridad)
+- [x] Imagen Docker self-contained (fase 13: bundle horneado en build, `.dockerignore` re-incluye `models/modelo_precio_propiedades`)
 
 ---
 

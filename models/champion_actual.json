@@ -1,0 +1,11 @@
+{
+  "asset_url": "https://github.com/matiasbelsito7/real-estate-price-prediction/releases/download/v1-bundle-modelo_precio_propiedades/modelo_precio_propiedades.zip",
+  "fecha_exportacion": "2026-08-16T17:30:59.003442+00:00",
+  "metricas_xgboost_test": {
+    "r2": 0.7830177855100848,
+    "rmse_log": 0.30398340722833644,
+    "rmse_usd": 87244.13211602891
+  },
+  "modelo_version": "xgboost-2026-08-16",
+  "tipo_modelo": "xgboost"
+}
