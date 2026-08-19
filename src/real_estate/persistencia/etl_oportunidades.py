@@ -64,19 +64,22 @@ def ejecutar_etl(
     input_file: str | Path = INPUT_DEFAULT,
     output_file: str | Path = OUTPUT_DEFAULT,
     directorio_modelo: str | Path = MODELO_DEFAULT,
-) -> None:
+) -> Path | None:
     """Ejecuta el ciclo completo del ETL de nuevas oportunidades."""
 
-    if not Path(input_file).exists():
+    input_file = Path(input_file)
+    output_file = Path(output_file)
+
+    if not input_file.exists():
         print(f"Saltando ETL: No existe el archivo de entrada '{input_file}'")
-        return
+        return None
 
     df_raw = pd.read_csv(input_file)
     df_nuevas = _solo_nuevas(df_raw, engine)
 
     if df_nuevas.empty:
         print("No hay publicaciones nuevas para procesar.")
-        return
+        return None
 
     print(f"Procesando {len(df_nuevas)} publicaciones nuevas...")
 
@@ -96,7 +99,9 @@ def ejecutar_etl(
     upsert_oportunidades(df_db, engine, modelo_version=version)
 
     # 5. Exportación
-    Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
     df_final.to_csv(output_file, index=False)
 
     print(f"ETL finalizado. Oportunidades guardadas en DB y en '{output_file}'")
+
+    return output_file

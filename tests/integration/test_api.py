@@ -19,11 +19,11 @@ from real_estate.api import ConfiguracionServicio, crear_app
 from real_estate.features import pipeline as pl
 from real_estate.features import transformations as tr
 from real_estate.models import entrenamiento as en
+from real_estate.persistencia.bundle import guardar_bundle
 from real_estate.persistencia.config import ConfiguracionPostgres
 from real_estate.persistencia.db import crear_engine
 from real_estate.persistencia.esquema import crear_tablas
 from real_estate.persistencia.repositorio import upsert_oportunidades
-from real_estate.serving import guardar_bundle
 
 
 def _df_curado_sintetico(n_filas: int = 96) -> pd.DataFrame:

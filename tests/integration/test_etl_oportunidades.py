@@ -19,16 +19,16 @@ from real_estate.curation import transformations as tr
 from real_estate.features import pipeline as pl
 from real_estate.features import transformations as ftr
 from real_estate.models import entrenamiento as en
+from real_estate.persistencia.bundle import guardar_bundle
 from real_estate.persistencia.config import ConfiguracionPostgres
 from real_estate.persistencia.db import crear_engine
 from real_estate.persistencia.esquema import crear_tablas
+from real_estate.persistencia.etl_oportunidades import ejecutar_etl
 from real_estate.persistencia.repositorio import (
     COLUMNAS_OPORTUNIDADES,
     ids_procesados,
     listar_oportunidades,
 )
-from real_estate.serving.etl_oportunidades import ejecutar_etl
-from real_estate.serving.persistencia import guardar_bundle
 
 FECHA = "2026-07-15"
 TASA = 1200.0

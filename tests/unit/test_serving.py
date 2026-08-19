@@ -11,8 +11,13 @@ import pytest
 from real_estate.features import pipeline as pl
 from real_estate.features import transformations as tr
 from real_estate.models import entrenamiento as en
-from real_estate.serving import ModeloPrediccion, cargar_bundle, guardar_bundle
-from real_estate.serving.persistencia import NOMBRE_FEATURES, NOMBRE_MODELO
+from real_estate.persistencia.bundle import (
+    NOMBRE_FEATURES,
+    NOMBRE_MODELO,
+    cargar_bundle,
+    guardar_bundle,
+)
+from real_estate.serving.modelo import ModeloPrediccion
 
 
 def _df_curado_sintetico(n_filas: int = 96) -> pd.DataFrame:
