@@ -48,7 +48,7 @@ from real_estate.models.entrenamiento import (  # noqa: E402
     entrenar_y_evaluar,
     separar_features_target,
 )
-from real_estate.serving.persistencia import guardar_bundle  # noqa: E402
+from real_estate.persistencia.bundle import guardar_bundle  # noqa: E402
 from real_estate.tracking import (  # noqa: E402
     MODELO_DEFAULT,
     configurar_tracking,

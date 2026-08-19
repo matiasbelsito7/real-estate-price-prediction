@@ -23,7 +23,7 @@ from pathlib import Path
 import pandas as pd
 
 from real_estate.curation.pipeline import curar_dataset, mostrar_dataset, mostrar_dataset_curado
-from real_estate.serving.persistencia import cargar_bundle
+from real_estate.persistencia.bundle import cargar_bundle
 
 INPUT_DEFAULT = "data/raw/propiedades_nuevas.csv"
 OUTPUT_DEFAULT = "data/processed/propiedades_nuevas_evaluadas.csv"

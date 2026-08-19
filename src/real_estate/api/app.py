@@ -39,10 +39,10 @@ from real_estate.api.schemas import (
     PropiedadEntrada,
 )
 from real_estate.persistencia import repositorio
+from real_estate.persistencia.bundle import NOMBRE_MODELO, cargar_bundle
 from real_estate.persistencia.config import ConfiguracionPostgres
 from real_estate.persistencia.db import crear_engine
 from real_estate.serving.modelo import ModeloPrediccion
-from real_estate.serving.persistencia import NOMBRE_MODELO, cargar_bundle
 
 VERSION = "0.1.0"
 

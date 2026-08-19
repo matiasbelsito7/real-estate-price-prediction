@@ -24,6 +24,7 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import Engine
 
+from real_estate.persistencia.bundle import cargar_bundle
 from real_estate.persistencia.repositorio import (
     COLUMNAS_OPORTUNIDADES,
     ids_procesados,
@@ -34,7 +35,6 @@ from real_estate.serving.clasificacion import (
     clasificar_por_diferencia,
 )
 from real_estate.serving.evaluar import MODELO_DEFAULT, evaluar_dataframe
-from real_estate.serving.persistencia import cargar_bundle
 
 INPUT_DEFAULT = "data/raw/propiedades_nuevas.csv"
 OUTPUT_DEFAULT = "reports/oportunidades_nuevas.csv"
@@ -50,12 +50,13 @@ def _modelo_version(directorio_modelo: str | Path) -> str:
 
 
 def _solo_nuevas(df: pd.DataFrame, engine: Engine) -> pd.DataFrame:
-    """Filtra las publicaciones cuyo id todavía no está persistido en la base."""
+    """Filtra las publicaciones cuyo id ya existe en la base de datos."""
 
-    ya_procesados = ids_procesados(engine)
-    if not ya_procesados:
+    ids_existentes = ids_procesados(engine)
+    if not ids_existentes:
         return df
-    return df[~df["id"].astype(str).isin(ya_procesados)]
+
+    return df[~df["id"].isin(ids_existentes)].copy()
 
 
 def ejecutar_etl(
@@ -63,56 +64,39 @@ def ejecutar_etl(
     input_file: str | Path = INPUT_DEFAULT,
     output_file: str | Path = OUTPUT_DEFAULT,
     directorio_modelo: str | Path = MODELO_DEFAULT,
-) -> Path:
-    """
-    Procesa las publicaciones nuevas del CSV y las persiste como oportunidades.
+) -> None:
+    """Ejecuta el ciclo completo del ETL de nuevas oportunidades."""
 
-    El dedup es contra PostgreSQL (el store persistente entre corridas del
-    pipeline): solo se curan, predicen y persisten los ids nuevos. Devuelve la
-    ruta del CSV de oportunidades nuevas exportado.
-    """
+    if not Path(input_file).exists():
+        print(f"Saltando ETL: No existe el archivo de entrada '{input_file}'")
+        return
 
-    input_path = Path(input_file)
-    output_path = Path(output_file)
+    df_raw = pd.read_csv(input_file)
+    df_nuevas = _solo_nuevas(df_raw, engine)
 
-    if not input_path.exists():
-        raise FileNotFoundError(f"No se encontró el archivo: {input_path}")
+    if df_nuevas.empty:
+        print("No hay publicaciones nuevas para procesar.")
+        return
 
-    print(f"Cargando publicaciones scrapeadas: {input_path}")
+    print(f"Procesando {len(df_nuevas)} publicaciones nuevas...")
 
-    df = pd.read_csv(input_path, low_memory=False)
+    # 1. Curación y Predicción
+    df_pred = evaluar_dataframe(df_nuevas, directorio_modelo=directorio_modelo)
 
-    print(f"\nPublicaciones en el CSV: {len(df):,}")
+    # 2. Clasificación (Oportunidades)
+    df_diff = clasificar_por_diferencia(df_pred)
+    df_final = clasificar_oportunidades(df_diff)
 
-    df = _solo_nuevas(df, engine)
-
-    print(f"Publicaciones nuevas (no persistidas): {len(df):,}")
-
-    if df.empty:
-        print("\nNo hay publicaciones nuevas para procesar.")
-        return output_path
-
-    df = evaluar_dataframe(df, directorio_modelo)
-
-    # `ratio_precio` (ranking de ofertas) + clasificación por propiedad; la
-    # segunda sobreescribe `clasificacion` con el resultado por propiedad.
-    df = clasificar_oportunidades(df)
-    df = clasificar_por_diferencia(df)
-
-    print("\n" + "=" * 70)
-    print("CLASIFICACIÓN")
-    print("=" * 70)
-    print(f"\n{df['clasificacion'].value_counts().to_string()}")
-
+    # 3. Metadatos del proceso
     version = _modelo_version(directorio_modelo)
+    df_final["modelo_version"] = version
 
-    persistidas = upsert_oportunidades(engine, df, modelo_version=version)
+    # 4. Persistencia
+    df_db = df_final[COLUMNAS_OPORTUNIDADES]
+    upsert_oportunidades(df_db, engine, modelo_version=version)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    # 5. Exportación
+    Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+    df_final.to_csv(output_file, index=False)
 
-    df[COLUMNAS_OPORTUNIDADES].to_csv(output_path, index=False)
-
-    print(f"\nOportunidades persistidas en PostgreSQL: {persistidas:,}")
-    print(f"CSV de oportunidades nuevas guardado en:\n{output_path}")
-
-    return output_path
+    print(f"ETL finalizado. Oportunidades guardadas en DB y en '{output_file}'")

@@ -36,7 +36,7 @@ from real_estate.ingestion.scraper import (  # noqa: E402
 from real_estate.persistencia.config import ConfiguracionPostgres  # noqa: E402
 from real_estate.persistencia.db import crear_engine  # noqa: E402
 from real_estate.persistencia.esquema import crear_tablas  # noqa: E402
-from real_estate.serving.etl_oportunidades import (  # noqa: E402
+from real_estate.persistencia.etl_oportunidades import (  # noqa: E402
     INPUT_DEFAULT,
     OUTPUT_DEFAULT,
     ejecutar_etl,
