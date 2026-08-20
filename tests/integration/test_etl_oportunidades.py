@@ -297,13 +297,14 @@ class TestEjecutarEtl:
         assert "4" in ids
         assert len(ids) == 4
 
-    def test_archivo_inexistente_lanza_file_not_found(
+    def test_archivo_inexistente_devuelve_none(
         self, tmp_path: Path, sin_red: None, bundle: Path, motor: Engine
     ) -> None:
-        with pytest.raises(FileNotFoundError):
-            ejecutar_etl(
-                engine=motor,
-                input_file=tmp_path / "no-existe.csv",
-                output_file=tmp_path / "oportunidades.csv",
-                directorio_modelo=bundle,
-            )
+        salida = ejecutar_etl(
+            engine=motor,
+            input_file=tmp_path / "no-existe.csv",
+            output_file=tmp_path / "oportunidades.csv",
+            directorio_modelo=bundle,
+        )
+
+        assert salida is None

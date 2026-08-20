@@ -87,8 +87,8 @@ def ejecutar_etl(
     df_pred = evaluar_dataframe(df_nuevas, directorio_modelo=directorio_modelo)
 
     # 2. Clasificación (Oportunidades)
-    df_diff = clasificar_por_diferencia(df_pred)
-    df_final = clasificar_oportunidades(df_diff)
+    df_diff = clasificar_oportunidades(df_pred)
+    df_final = clasificar_por_diferencia(df_diff)
 
     # 3. Metadatos del proceso
     version = _modelo_version(directorio_modelo)
@@ -100,7 +100,7 @@ def ejecutar_etl(
 
     # 5. Exportación
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    df_final.to_csv(output_file, index=False)
+    df_final[COLUMNAS_OPORTUNIDADES].to_csv(output_file, index=False)
 
     print(f"ETL finalizado. Oportunidades guardadas en DB y en '{output_file}'")
 
