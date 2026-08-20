@@ -146,6 +146,7 @@ class TestGuardarCargarBundle:
             modelo=resultado.modelo_xgboost,
             ajustes=resultado.ajustes,
             columnas_features=["a"],
+            metadata={"metricas_xgboost_test": resultado.metricas_xgboost_test},
         )
 
         for nombre in (NOMBRE_MODELO, NOMBRE_FEATURES, "preprocesamiento.json", "metadata.json"):

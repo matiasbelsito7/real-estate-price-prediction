@@ -96,7 +96,7 @@ def ejecutar_etl(
 
     # 4. Persistencia
     df_db = df_final[COLUMNAS_OPORTUNIDADES]
-    upsert_oportunidades(df_db, engine, modelo_version=version)
+    upsert_oportunidades(engine, df_db, modelo_version=version)
 
     # 5. Exportación
     output_file.parent.mkdir(parents=True, exist_ok=True)
