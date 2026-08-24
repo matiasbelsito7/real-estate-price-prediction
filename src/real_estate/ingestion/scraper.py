@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 import random
 import re
@@ -59,6 +60,8 @@ from typing import Any, cast
 
 import requests
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.argenprop.com/inmuebles/venta/capital-federal"
 
@@ -439,18 +442,22 @@ def scrapear(
     """
     asegurar_encabezado(output_path)
     ids_existentes = cargar_ids_existentes(output_path)
-    print(f"IDs ya guardados previamente: {len(ids_existentes)}")
+    logger.info("IDs ya guardados previamente: %d", len(ids_existentes))
 
     estado_progreso: dict[str, Any] = {}
     if archivo_progreso:
         estado_progreso = cargar_progreso(archivo_progreso)
         if not revision_periodica and (estado_progreso.get(nombre_segmento) or {}).get("completo"):
-            print(f"Segmento '{nombre_segmento}' ya quedó completo en el progreso. Lo salteo.")
+            logger.info(
+                "Segmento '%s' ya quedó completo en el progreso. Lo salteo.", nombre_segmento
+            )
             return
         reanudar_en = pagina_de_reanudacion(archivo_progreso, nombre_segmento)
         if reanudar_en is not None:
             pagina_inicio = reanudar_en
-            print(f"Reanudo el segmento '{nombre_segmento}' desde la página {pagina_inicio}.")
+            logger.info(
+                "Reanudo el segmento '%s' desde la página %d.", nombre_segmento, pagina_inicio
+            )
 
     session = requests.Session()
     session.headers.update(HEADERS)
@@ -466,7 +473,7 @@ def scrapear(
 
     while True:
         if max_paginas is not None and (pagina - pagina_inicio) >= max_paginas:
-            print(f"Llegué al límite de {max_paginas} páginas. Corto acá.")
+            logger.info("Llegué al límite de %d páginas. Corto acá.", max_paginas)
             segmento_completo = True
             break
 
@@ -474,31 +481,35 @@ def scrapear(
         try:
             resp = session.get(url, timeout=20)
         except requests.RequestException as e:
-            print(f"Error de red en página {pagina}: {e}. Reintento en 10s...")
+            logger.warning("Error de red en página %d: %s. Reintento en 10s...", pagina, e)
             time.sleep(10)
             continue
 
         if resp.status_code == 404:
-            print(f"Página {pagina} devolvió 404: asumo que llegué al final del listado.")
+            logger.info("Página %d devolvió 404: asumo que llegué al final del listado.", pagina)
             segmento_completo = True
             break
 
         if resp.status_code == STATUS_BLOQUEO:
             if pagina >= MAX_PAGINAS_SERVICIO:
-                print(
-                    f"Página {pagina}: el sitio corta la paginación en "
-                    f"{MAX_PAGINAS_SERVICIO} páginas (HTTP 202 vacío). "
-                    "Fin del segmento."
+                logger.info(
+                    "Página %d: el sitio corta la paginación en "
+                    "%d páginas (HTTP 202 vacío). Fin del segmento.",
+                    pagina,
+                    MAX_PAGINAS_SERVICIO,
                 )
                 segmento_completo = True
                 break
             reintentos_202_actual += 1
             if reintentos_202_actual <= reintentos_202:
                 espera = min(backoff_202_inicial * (2 ** (reintentos_202_actual - 1)), 120)
-                print(
-                    f"Página {pagina}: el sitio bloqueó el request (HTTP 202). "
-                    f"Reintento {reintentos_202_actual}/{reintentos_202} "
-                    f"en {espera:.0f}s..."
+                logger.info(
+                    "Página %d: el sitio bloqueó el request (HTTP 202). "
+                    "Reintento %d/%d en %.0fs...",
+                    pagina,
+                    reintentos_202_actual,
+                    reintentos_202,
+                    espera,
                 )
                 time.sleep(espera)
                 continue
@@ -506,16 +517,20 @@ def scrapear(
             reintentos_202_actual = 0
             pausas_largas += 1
             if pausas_largas > 2:
-                print(
-                    f"Página {pagina}: bloqueo persistente del sitio tras "
-                    f"{pausas_largas} pausas largas. Guardo el progreso y corto "
-                    "el segmento; se reanuda con el mismo comando."
+                logger.warning(
+                    "Página %d: bloqueo persistente del sitio tras "
+                    "%d pausas largas. Guardo el progreso y corto "
+                    "el segmento; se reanuda con el mismo comando.",
+                    pagina,
+                    pausas_largas,
                 )
                 segmento_completo = False
                 break
-            print(
-                f"Página {pagina}: bloqueo sostenido del sitio. "
-                f"Pausa larga de {pausa_bloqueo:.0f}s antes de reintentar..."
+            logger.info(
+                "Página %d: bloqueo sostenido del sitio. "
+                "Pausa larga de %.0fs antes de reintentar...",
+                pagina,
+                pausa_bloqueo,
             )
             time.sleep(pausa_bloqueo)
             continue
@@ -526,14 +541,19 @@ def scrapear(
             reintentos_202_actual += 1
             if reintentos_202_actual <= reintentos_202:
                 espera = min(backoff_202_inicial * (2 ** (reintentos_202_actual - 1)), 120)
-                print(
-                    f"Página {pagina}: status {resp.status_code}. "
-                    f"Reintento {reintentos_202_actual}/{reintentos_202} "
-                    f"en {espera:.0f}s..."
+                logger.info(
+                    "Página %d: status %d. Reintento %d/%d en %.0fs...",
+                    pagina,
+                    resp.status_code,
+                    reintentos_202_actual,
+                    reintentos_202,
+                    espera,
                 )
                 time.sleep(espera)
                 continue
-            print(f"Página {pagina}: status {resp.status_code} persistente. Corto el segmento.")
+            logger.warning(
+                "Página %d: status %d persistente. Corto el segmento.", pagina, resp.status_code
+            )
             segmento_completo = False
             break
 
@@ -548,9 +568,9 @@ def scrapear(
 
         if not listings:
             paginas_vacias_seguidas += 1
-            print(f"Página {pagina}: sin avisos.")
+            logger.info("Página %d: sin avisos.", pagina)
             if paginas_vacias_seguidas >= 2:
-                print("Dos páginas vacías seguidas: termino el scraping.")
+                logger.info("Dos páginas vacías seguidas: termino el scraping.")
                 segmento_completo = True
                 break
             pagina += 1
@@ -581,18 +601,22 @@ def scrapear(
         if filas_pagina and not alguna_con_datos:
             paginas_sin_features_seguidas += 1
             if paginas_sin_features_seguidas >= 3:
-                print(
-                    "\n⚠️  ADVERTENCIA: las últimas 3 páginas no trajeron ni "
+                logger.warning(
+                    "ADVERTENCIA: las últimas 3 páginas no trajeron ni "
                     "superficie_cubierta ni dormitorios en ningún aviso. Es "
                     "probable que el sitio haya cambiado la estructura del "
                     "HTML de nuevo. Corré con --html-debug pagina.html para "
-                    "guardar el HTML crudo e inspeccionarlo.\n"
+                    "guardar el HTML crudo e inspeccionarlo."
                 )
         else:
             paginas_sin_features_seguidas = 0
 
-        print(
-            f"Página {pagina}: {len(listings)} avisos encontrados, {len(filas_pagina)} nuevos guardados. Total nuevos: {total_nuevos}"
+        logger.info(
+            "Página %d: %d avisos encontrados, %d nuevos guardados. Total nuevos: %d",
+            pagina,
+            len(listings),
+            len(filas_pagina),
+            total_nuevos,
         )
 
         ultima_pagina_ok = pagina
@@ -613,9 +637,12 @@ def scrapear(
         }
         guardar_progreso(archivo_progreso, estado_progreso)
         estado = "completo" if segmento_completo else "incompleto"
-        print(
-            f"Progreso del segmento '{nombre_segmento}' guardado en "
-            f"'{archivo_progreso}' ({estado}, hasta página {ultima_pagina_ok})."
+        logger.info(
+            "Progreso del segmento '%s' guardado en '%s' (%s, hasta página %d).",
+            nombre_segmento,
+            archivo_progreso,
+            estado,
+            ultima_pagina_ok,
         )
 
-    print(f"\nListo. Se agregaron {total_nuevos} avisos nuevos a '{output_path}'.")
+    logger.info("Listo. Se agregaron %d avisos nuevos a '%s'.", total_nuevos, output_path)

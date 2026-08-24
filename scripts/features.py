@@ -15,6 +15,7 @@ Etapas:
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -26,6 +27,9 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from real_estate.features.pipeline import construir_features, mostrar_features  # noqa: E402
+from real_estate.utils.logging import configurar_logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 def construir_features_csv(input_file: str | Path, output_file: str | Path) -> None:
@@ -37,7 +41,7 @@ def construir_features_csv(input_file: str | Path, output_file: str | Path) -> N
     if not input_path.exists():
         raise FileNotFoundError(f"No se encontró el archivo: {input_path}")
 
-    print(f"Cargando dataset: {input_path}")
+    logger.info(f"Cargando dataset: {input_path}")
 
     df = pd.read_csv(input_path, low_memory=False)
 
@@ -49,14 +53,15 @@ def construir_features_csv(input_file: str | Path, output_file: str | Path) -> N
 
     df.to_csv(output_path, index=False)
 
-    print("\n" + "=" * 70)
-    print("FEATURE ENGINEERING FINALIZADO")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("FEATURE ENGINEERING FINALIZADO")
+    logger.info("=" * 70)
 
-    print(f"\nMatriz de features guardada en:\n{output_path}")
+    logger.info(f"\nMatriz de features guardada en:\n{output_path}")
 
 
 def main() -> None:
+    configurar_logging()
     parser = argparse.ArgumentParser(
         description="Feature Engineering: construye la matriz de features a partir del dataset curado"
     )

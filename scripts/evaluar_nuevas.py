@@ -20,6 +20,7 @@ entrada y el CSV evaluado de salida.
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -34,9 +35,13 @@ from real_estate.serving.evaluar import (  # noqa: E402
     OUTPUT_DEFAULT,
     evaluar_nuevas,
 )
+from real_estate.utils.logging import configurar_logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    configurar_logging()
     parser = argparse.ArgumentParser(
         description=(
             "Predice el precio de las nuevas publicaciones de Argenprop "

@@ -20,6 +20,7 @@ corrida queda interrumpida, reanuda desde la última página procesada.
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -33,12 +34,16 @@ from real_estate.ingestion.scraper import (  # noqa: E402
     construir_url_segmento,
     scrapear,
 )
+from real_estate.utils.logging import configurar_logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 OUTPUT_DEFAULT = "data/raw/propiedades_nuevas.csv"
 PROGRESO_DEFAULT = "data/raw/progreso_scrape_nuevas.json"
 
 
 def main() -> None:
+    configurar_logging()
     parser = argparse.ArgumentParser(
         description="Scraper de nuevas publicaciones de Argenprop (dataset separado)"
     )
@@ -116,7 +121,7 @@ def main() -> None:
             ("global", construir_url_segmento(tipo=args.tipo)),
         ]
 
-    print(
+    logger.info(
         f"Recorro {len(segmentos)} segmento(s) en modo revision periódica "
         "(re-escaneea aunque el progreso diga completo): "
         + ", ".join(f"'{nombre}'" for nombre, _ in segmentos)
@@ -124,7 +129,7 @@ def main() -> None:
 
     try:
         for nombre_segmento, base_url in segmentos:
-            print(f"\n========== Segmento: {nombre_segmento} ==========")
+            logger.info(f"\n========== Segmento: {nombre_segmento} ==========")
             scrapear(
                 output_path=args.output,
                 max_paginas=args.max_paginas,
@@ -141,7 +146,9 @@ def main() -> None:
                 revision_periodica=True,
             )
     except KeyboardInterrupt:
-        print("\nInterrumpido por el usuario. Lo scrapeado hasta ahora ya está guardado en el CSV.")
+        logger.info(
+            "\nInterrumpido por el usuario. Lo scrapeado hasta ahora ya está guardado en el CSV."
+        )
         sys.exit(0)
 
 

@@ -12,6 +12,7 @@ from real_estate.features import pipeline as pl
 from real_estate.features import transformations as tr
 from real_estate.models import entrenamiento as en
 from real_estate.persistencia.bundle import (
+    NOMBRE_CHECKSUM,
     NOMBRE_FEATURES,
     NOMBRE_MODELO,
     cargar_bundle,
@@ -251,3 +252,42 @@ class TestPersistenciaArchivos:
             contenido = json.load(f)
 
         assert "metricas_xgboost_test" in contenido
+
+    def test_checksum_es_archivo_json_valido(
+        self, modelo_y_bundle: tuple[ModeloPrediccion, list[str]], tmp_path: object
+    ) -> None:
+        _, _ = modelo_y_bundle
+
+        checksum_path = tmp_path / NOMBRE_CHECKSUM  # type: ignore[operator]
+        assert checksum_path.exists()
+
+        with open(checksum_path, encoding="utf-8") as f:
+            checksums = json.load(f)
+
+        assert isinstance(checksums, dict)
+        assert NOMBRE_MODELO in checksums
+        assert NOMBRE_FEATURES in checksums
+        assert "preprocesamiento.json" in checksums
+        assert "metadata.json" in checksums
+        for hash_val in checksums.values():
+            assert isinstance(hash_val, str)
+            assert len(hash_val) == 64  # SHA-256 hex digest length
+
+    def test_checksum_verifica_integridad(
+        self, modelo_y_bundle: tuple[ModeloPrediccion, list[str]], tmp_path: object
+    ) -> None:
+        _, _ = modelo_y_bundle
+
+        # Bundle is valid, should load without error
+        modelo = cargar_bundle(tmp_path)  # type: ignore[arg-type]
+        assert isinstance(modelo, ModeloPrediccion)
+
+        # Tamper with a file to break checksum
+        modelo_path = tmp_path / NOMBRE_MODELO  # type: ignore[operator]
+        with open(modelo_path, "rb") as f:
+            contenido = f.read()
+        with open(modelo_path, "wb") as f:
+            f.write(b"TAMPERED" + contenido)
+
+        with pytest.raises(ValueError, match="Checksum mismatch"):
+            cargar_bundle(tmp_path)  # type: ignore[arg-type]

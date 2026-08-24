@@ -17,10 +17,13 @@ Ejemplos:
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # Columnas que deberían ser numéricas
 NUMERIC_COLUMNS = [
@@ -125,15 +128,15 @@ def limpiar_numero(valor: Any) -> Any:
 def limpiar_columnas_numericas(df: pd.DataFrame) -> pd.DataFrame:
     """Convierte las columnas numéricas a tipos numéricos."""
 
-    print("\n" + "=" * 70)
-    print("1. LIMPIEZA DE TIPOS")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("1. LIMPIEZA DE TIPOS")
+    logger.info("=" * 70)
 
     for column in NUMERIC_COLUMNS:
         if column not in df.columns:
             continue
 
-        print(f"Convirtiendo: {column}")
+        logger.info("Convirtiendo: %s", column)
 
         df[column] = df[column].apply(limpiar_numero)
         df[column] = pd.to_numeric(df[column], errors="coerce")
@@ -152,7 +155,7 @@ def limpiar_expensas(df: pd.DataFrame) -> pd.DataFrame:
     if "expensas" not in df.columns:
         return df
 
-    print("\nConvirtiendo expensas...")
+    logger.info("Convirtiendo expensas...")
 
     df["expensas"] = df["expensas"].apply(limpiar_numero)
     df["expensas"] = pd.to_numeric(df["expensas"], errors="coerce")

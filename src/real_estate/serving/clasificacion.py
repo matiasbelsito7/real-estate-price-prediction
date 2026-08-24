@@ -25,11 +25,14 @@ el entry point de CLI (wrapper fino).
 
 from __future__ import annotations
 
+import logging
 import math
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 INPUT_DEFAULT = "data/processed/propiedades_nuevas_evaluadas.csv"
 OUTPUT_DEFAULT = "reports/ofertas.csv"
@@ -170,14 +173,14 @@ def clasificar_y_exportar(
     if not input_path.exists():
         raise FileNotFoundError(f"No se encontró el archivo: {input_path}")
 
-    print(f"Cargando dataset evaluado: {input_path}")
+    logger.info("Cargando dataset evaluado: %s", input_path)
 
     df = pd.read_csv(input_path, low_memory=False)
 
     df = clasificar_oportunidades(df)
 
-    print(f"\nPublicaciones clasificadas: {len(df):,}")
-    print(df["clasificacion"].value_counts().to_string())
+    logger.info("Publicaciones clasificadas: %s", f"{len(df):,}")
+    logger.info("\n%s", df["clasificacion"].value_counts().to_string())
 
     df = df.sort_values("ratio_precio", ascending=False, na_position="last")
 
@@ -186,14 +189,14 @@ def clasificar_y_exportar(
 
     df[COLUMNAS_OFERTAS].to_csv(output_path, index=False)
 
-    print("\n" + "=" * 70)
-    print("RANKING DE OPORTUNIDADES")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("RANKING DE OPORTUNIDADES")
+    logger.info("=" * 70)
 
     top = df[COLUMNAS_OFERTAS].head(10)
-    print(f"\nTop {len(top)} (ratio descendente):")
-    print(top.to_string(index=False))
+    logger.info("Top %d (ratio descendente):", len(top))
+    logger.info("\n%s", top.to_string(index=False))
 
-    print(f"\nRanking guardado en:\n{output_path}")
+    logger.info("Ranking guardado en: %s", output_path)
 
     return output_path

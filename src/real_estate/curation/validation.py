@@ -13,9 +13,12 @@ registros con valores presentes pero sin sentido (p. ej., precio <= 0).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 def _contar_invalidos(
@@ -79,9 +82,9 @@ def validar(df: pd.DataFrame) -> pd.DataFrame:
         }
     )
 
-    print("\n" + "=" * 70)
-    print("VALIDACIÓN")
-    print("=" * 70)
-    print(reporte.to_string(index=False))
+    logger.info("=" * 70)
+    logger.info("VALIDACIÓN")
+    logger.info("=" * 70)
+    logger.info("\n%s", reporte.to_string(index=False))
 
     return reporte

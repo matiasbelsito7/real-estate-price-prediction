@@ -16,8 +16,12 @@ para poder ajustar sobre el set de entrenamiento y aplicar sobre val/test.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # Columnas sin señal (EDA 01): cobertura < 3 % o texto libre/identificadores.
 COLUMNAS_DESCARTAR = [
@@ -115,8 +119,10 @@ def crear_target_log(
     descartadas = previas - len(df)
 
     if descartadas:
-        print(
-            f"Descartadas {descartadas:,} filas con precio inválido (< {precio_minimo:,.0f} USD)."
+        logger.info(
+            "Descartadas %s filas con precio inválido (< %s USD).",
+            f"{descartadas:,}",
+            f"{precio_minimo:,.0f}",
         )
 
     df[TARGET_LOG] = np.log(df[columna_precio])

@@ -27,6 +27,7 @@ store local `mlruns/`.
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -44,6 +45,9 @@ from real_estate.features.transformations import (  # noqa: E402
 )
 from real_estate.models.modelos_lineales import entrenar_y_evaluar_lineales  # noqa: E402
 from real_estate.tracking import configurar_tracking, registrar_lineales  # noqa: E402
+from real_estate.utils.logging import configurar_logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 def entrenar_lineales_pipeline(
@@ -60,7 +64,7 @@ def entrenar_lineales_pipeline(
     if not input_path.exists():
         raise FileNotFoundError(f"No se encontró el archivo: {input_path}")
 
-    print(f"Cargando dataset: {input_path}")
+    logger.info(f"Cargando dataset: {input_path}")
 
     df = pd.read_csv(input_path, low_memory=False)
 
@@ -70,7 +74,7 @@ def entrenar_lineales_pipeline(
 
     if not no_tracking:
         experimento = configurar_tracking()
-        print(f"\nTracking MLflow: experimento '{experimento}'")
+        logger.info(f"\nTracking MLflow: experimento '{experimento}'")
 
     resultado = entrenar_y_evaluar_lineales(
         train,
@@ -90,14 +94,15 @@ def entrenar_lineales_pipeline(
             split_sizes={"train": len(train), "val": len(val), "test": len(test)},
         )
         for nombre, run_id in runs:
-            print(f"Run MLflow ({nombre}): {run_id}")
+            logger.info(f"Run MLflow ({nombre}): {run_id}")
 
-    print("\n" + "=" * 70)
-    print("MODELOS LINEALES FINALIZADOS (fase 4)")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("MODELOS LINEALES FINALIZADOS (fase 4)")
+    logger.info("=" * 70)
 
 
 def main() -> None:
+    configurar_logging()
     parser = argparse.ArgumentParser(
         description=(
             "Modelos lineales: pipeline train/val/test sin fuga, Lasso y Ridge "

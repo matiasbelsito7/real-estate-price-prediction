@@ -23,6 +23,7 @@ repos:
         additional_dependencies:
           - pandas-stubs
           - types-requests
+          - types-PyYAML
           # pytest (con py.typed) para tipar los decoradores
           # @pytest.mark.parametrize y @pytest.fixture de los tests.
           - pytest
@@ -32,6 +33,7 @@ repos:
           - fastapi
           - pydantic
           - pydantic-settings
+          - slowapi
 
 
   # ==========================================================

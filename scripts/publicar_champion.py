@@ -33,6 +33,7 @@ todavía no existe.
 
 import argparse
 import json
+import logging
 import subprocess
 import sys
 import zipfile
@@ -49,6 +50,9 @@ from real_estate.persistencia.bundle import (  # noqa: E402
     NOMBRE_MODELO,
     NOMBRE_PREPROCESAMIENTO,
 )
+from real_estate.utils.logging import configurar_logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 BUNDLE_DIR_DEFAULT = Path("models/modelo_precio_propiedades")
 FINGERPRINT_DEFAULT = Path("models/champion_actual.json")
@@ -134,7 +138,7 @@ def fingerprint_desde_metadata(metadata: dict[str, object], asset_url: str) -> d
 def _ejecutar(comando: list[str]) -> None:
     """Ejecuta un comando externo (gh/git) mostrando la línea en stdout."""
 
-    print("+", " ".join(comando))
+    logger.info("+ %s", " ".join(comando))
     subprocess.run(comando, check=True)
 
 
@@ -183,17 +187,19 @@ def publicar_champion(
     if fingerprint_path.is_file():
         existente: dict[str, object] = json.loads(fingerprint_path.read_text(encoding="utf-8"))
         if existente == fingerprint:
-            print(f"Sin cambios: el champion {fingerprint['modelo_version']} ya está publicado.")
+            logger.info(
+                f"Sin cambios: el champion {fingerprint['modelo_version']} ya está publicado."
+            )
             return False
 
     modelo_version = str(fingerprint["modelo_version"])
-    print(f"Nuevo champion detectado: {modelo_version}")
+    logger.info(f"Nuevo champion detectado: {modelo_version}")
 
     crear_zip(bundle_dir, zip_salida)
-    print(f"Bundle comprimido: {zip_salida}")
+    logger.info(f"Bundle comprimido: {zip_salida}")
 
     if no_upload:
-        print("Modo --no-upload: no se sube el asset a GitHub Releases.")
+        logger.info("Modo --no-upload: no se sube el asset a GitHub Releases.")
     else:
         _ejecutar(
             ["gh", "release", "upload", tag, str(zip_salida), "--clobber", "--repo", repo_efectivo]
@@ -203,7 +209,7 @@ def publicar_champion(
         json.dumps(fingerprint, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    print(f"Fingerprint actualizado: {fingerprint_path}")
+    logger.info(f"Fingerprint actualizado: {fingerprint_path}")
 
     if not no_upload:
         _commit_y_push(fingerprint_path, commit, push, modelo_version)
@@ -212,6 +218,7 @@ def publicar_champion(
 
 
 def main() -> None:
+    configurar_logging()
     parser = argparse.ArgumentParser(
         description=(
             "Publica el bundle del champion en GitHub Releases y deja el "

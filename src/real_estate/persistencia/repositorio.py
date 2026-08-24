@@ -109,7 +109,7 @@ def ids_procesados(engine: Engine) -> set[str]:
 
     stmt = select(oportunidades.c.id)
     with engine.connect() as conexion:
-        return {str(fila[0]) for fila in conexion.execute(stmt)}
+        return {str(fila[0]) for fila in conexion.execute(stmt) if fila[0] is not None}
 
 
 def listar_oportunidades(

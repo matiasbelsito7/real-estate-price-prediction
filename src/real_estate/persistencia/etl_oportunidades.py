@@ -19,6 +19,7 @@ también puede ejecutar el scraping previo).
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -35,6 +36,8 @@ from real_estate.serving.clasificacion import (
     clasificar_por_diferencia,
 )
 from real_estate.serving.evaluar import MODELO_DEFAULT, evaluar_dataframe
+
+logger = logging.getLogger(__name__)
 
 INPUT_DEFAULT = "data/raw/propiedades_nuevas.csv"
 OUTPUT_DEFAULT = "reports/oportunidades_nuevas.csv"
@@ -71,17 +74,17 @@ def ejecutar_etl(
     output_file = Path(output_file)
 
     if not input_file.exists():
-        print(f"Saltando ETL: No existe el archivo de entrada '{input_file}'")
+        logger.info("Saltando ETL: No existe el archivo de entrada '%s'", input_file)
         return None
 
     df_raw = pd.read_csv(input_file)
     df_nuevas = _solo_nuevas(df_raw, engine)
 
     if df_nuevas.empty:
-        print("No hay publicaciones nuevas para procesar.")
+        logger.info("No hay publicaciones nuevas para procesar.")
         return None
 
-    print(f"Procesando {len(df_nuevas)} publicaciones nuevas...")
+    logger.info("Procesando %d publicaciones nuevas...", len(df_nuevas))
 
     # 1. Curación y Predicción
     df_pred = evaluar_dataframe(df_nuevas, directorio_modelo=directorio_modelo)
@@ -102,6 +105,6 @@ def ejecutar_etl(
     output_file.parent.mkdir(parents=True, exist_ok=True)
     df_final[COLUMNAS_OPORTUNIDADES].to_csv(output_file, index=False)
 
-    print(f"ETL finalizado. Oportunidades guardadas en DB y en '{output_file}'")
+    logger.info("ETL finalizado. Oportunidades guardadas en DB y en '%s'", output_file)
 
     return output_file

@@ -17,6 +17,7 @@ store local `mlruns/`.
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -31,6 +32,9 @@ from real_estate.tracking import (  # noqa: E402
     configurar_tracking,
     elegir_champion,
 )
+from real_estate.utils.logging import configurar_logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 def comparar(
@@ -42,31 +46,34 @@ def comparar(
 
     configurar_tracking(experimento=experimento)
 
-    print(f"\nComparando corridas del experimento '{experimento}'")
-    print(f"Métrica: {metrica} | Máx. corridas: {max_runs}")
-    print("=" * 70)
+    logger.info(f"\nComparando corridas del experimento '{experimento}'")
+    logger.info(f"Métrica: {metrica} | Máx. corridas: {max_runs}")
+    logger.info("=" * 70)
 
     tabla = comparar_runs(experimento, metrica, max_runs)
 
     if tabla.empty:
-        print(f"No hay corridas con la métrica '{metrica}' en el experimento '{experimento}'.")
+        logger.warning(
+            f"No hay corridas con la métrica '{metrica}' en el experimento '{experimento}'."
+        )
         return
 
-    print(f"\n{len(tabla)} corridas con la métrica '{metrica}' (mejor a peor):")
-    print(tabla.to_string(index=False))
+    logger.info(f"\n{len(tabla)} corridas con la métrica '{metrica}' (mejor a peor):")
+    logger.info(tabla.to_string(index=False))
 
     champion = elegir_champion(experimento, metrica, max_runs)
 
-    print("\n" + "=" * 70)
-    print("CHAMPION")
-    print("=" * 70)
-    print(f"run_id:      {champion.run_id}")
-    print(f"tipo_modelo: {champion.tipo_modelo}")
-    print(f"métrica:     {champion.metrica}")
-    print(f"valor:       {champion.valor:.4f}")
+    logger.info("\n" + "=" * 70)
+    logger.info("CHAMPION")
+    logger.info("=" * 70)
+    logger.info(f"run_id:      {champion.run_id}")
+    logger.info(f"tipo_modelo: {champion.tipo_modelo}")
+    logger.info(f"métrica:     {champion.metrica}")
+    logger.info(f"valor:       {champion.valor:.4f}")
 
 
 def main() -> None:
+    configurar_logging()
     parser = argparse.ArgumentParser(
         description=(
             "Comparación de corridas de MLflow: tabla de corridas con la "

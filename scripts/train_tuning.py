@@ -30,6 +30,7 @@ store local `mlruns/`.
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -47,6 +48,9 @@ from real_estate.features.transformations import (  # noqa: E402
 )
 from real_estate.models.tuning import GRID_REDUCIDO, tunear_xgboost  # noqa: E402
 from real_estate.tracking import configurar_tracking, registrar_tuning  # noqa: E402
+from real_estate.utils.logging import configurar_logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 def tunear_xgboost_pipeline(
@@ -65,7 +69,7 @@ def tunear_xgboost_pipeline(
     if not input_path.exists():
         raise FileNotFoundError(f"No se encontró el archivo: {input_path}")
 
-    print(f"Cargando dataset: {input_path}")
+    logger.info(f"Cargando dataset: {input_path}")
 
     df = pd.read_csv(input_path, low_memory=False)
 
@@ -75,7 +79,7 @@ def tunear_xgboost_pipeline(
 
     if not no_tracking:
         experimento = configurar_tracking()
-        print(f"\nTracking MLflow: experimento '{experimento}'")
+        logger.info(f"\nTracking MLflow: experimento '{experimento}'")
 
     resultado = tunear_xgboost(
         train,
@@ -99,15 +103,16 @@ def tunear_xgboost_pipeline(
             dataset_info=str(input_path),
             split_sizes={"train": len(train), "val": len(val), "test": len(test)},
         )
-        print(f"\nRun resumen MLflow: {run_id}")
-        print(f"Trials registrados: {len(trials)}")
+        logger.info(f"\nRun resumen MLflow: {run_id}")
+        logger.info(f"Trials registrados: {len(trials)}")
 
-    print("\n" + "=" * 70)
-    print("TUNING DE XGBOOST FINALIZADO (fase 5)")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("TUNING DE XGBOOST FINALIZADO (fase 5)")
+    logger.info("=" * 70)
 
 
 def main() -> None:
+    configurar_logging()
     parser = argparse.ArgumentParser(
         description=(
             "Tuning de hiperparámetros de XGBoost: búsqueda con "

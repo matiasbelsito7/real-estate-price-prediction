@@ -17,6 +17,7 @@ periódico (fase 12) reusa `evaluar_dataframe`.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,6 +25,8 @@ import pandas as pd
 
 from real_estate.curation.pipeline import curar_dataset, mostrar_dataset, mostrar_dataset_curado
 from real_estate.persistencia.bundle import cargar_bundle
+
+logger = logging.getLogger(__name__)
 
 INPUT_DEFAULT = "data/raw/propiedades_nuevas.csv"
 OUTPUT_DEFAULT = "data/processed/propiedades_nuevas_evaluadas.csv"
@@ -71,21 +74,25 @@ def evaluar_dataframe(
 
     mostrar_dataset_curado(df)
 
-    print("\n" + "=" * 70)
-    print("PREDICCIÓN")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("PREDICCIÓN")
+    logger.info("=" * 70)
 
     modelo = cargar_bundle(directorio_modelo)
 
-    print(f"\nModelo cargado: {directorio_modelo}")
-    print(f"Features esperadas: {len(modelo.columnas_features)}")
+    logger.info("Modelo cargado: %s", directorio_modelo)
+    logger.info("Features esperadas: %d", len(modelo.columnas_features))
 
     df["precio_predicho_usd"] = modelo.predecir_usd(df)
 
     df["fecha_prediccion"] = fecha_prediccion or datetime.now(UTC).date().isoformat()
 
-    print(f"\nPredichas: {df['precio_predicho_usd'].notna().sum():,} de {len(df):,} publicaciones")
-    print(f"Mediana del precio predicho: {df['precio_predicho_usd'].median():,.0f} USD")
+    logger.info(
+        "Predichas: %s de %s publicaciones",
+        f"{df['precio_predicho_usd'].notna().sum():,}",
+        f"{len(df):,}",
+    )
+    logger.info("Mediana del precio predicho: %s USD", f"{df['precio_predicho_usd'].median():,.0f}")
 
     return df
 
@@ -108,7 +115,7 @@ def evaluar_nuevas(
     if not input_path.exists():
         raise FileNotFoundError(f"No se encontró el archivo: {input_path}")
 
-    print(f"Cargando dataset de nuevas publicaciones: {input_path}")
+    logger.info("Cargando dataset de nuevas publicaciones: %s", input_path)
 
     df = pd.read_csv(input_path, low_memory=False)
 
@@ -120,8 +127,8 @@ def evaluar_nuevas(
 
     df[COLUMNAS_SALIDA].to_csv(output_path, index=False)
 
-    print("\n" + "=" * 70)
-    print("EVALUACIÓN FINALIZADA")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("EVALUACIÓN FINALIZADA")
+    logger.info("=" * 70)
 
-    print(f"\nDataset evaluado guardado en:\n{output_path}")
+    logger.info("Dataset evaluado guardado en: %s", output_path)

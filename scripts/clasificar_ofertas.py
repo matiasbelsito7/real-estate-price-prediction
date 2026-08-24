@@ -18,6 +18,7 @@ Pensado para correrse después de `scripts/evaluar_nuevas.py` (mismo cron).
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -31,9 +32,13 @@ from real_estate.serving.clasificacion import (  # noqa: E402
     OUTPUT_DEFAULT,
     clasificar_y_exportar,
 )
+from real_estate.utils.logging import configurar_logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
+    configurar_logging()
     parser = argparse.ArgumentParser(
         description=(
             "Clasifica las nuevas publicaciones evaluadas como buena/mala "

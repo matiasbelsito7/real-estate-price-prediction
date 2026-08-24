@@ -15,10 +15,15 @@ cada corrida de curación.
 
 import argparse
 import csv
+import logging
 import sys
 from pathlib import Path
 
 import requests
+
+from real_estate.utils.logging import configurar_logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 # Serie completa del dólar blue (compra/venta por día hábil).
 URL_HISTORICO = "https://api.argentinadatos.com/v1/cotizaciones/dolares/blue"
@@ -61,6 +66,7 @@ def guardar_historico(datos: list[dict[str, object]], ruta: str) -> None:
 
 
 def main() -> None:
+    configurar_logging()
     parser = argparse.ArgumentParser(
         description="Descarga el histórico del dólar blue y lo guarda como CSV"
     )
@@ -71,29 +77,29 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print(f"Descargando histórico del dólar blue desde {URL_HISTORICO} ...")
+    logger.info(f"Descargando histórico del dólar blue desde {URL_HISTORICO} ...")
 
     try:
         datos = descargar_historico(URL_HISTORICO)
     except requests.RequestException as e:
-        print(f"Error de red: {e}", file=sys.stderr)
+        logger.error(f"Error de red: {e}")
         sys.exit(1)
 
     if not datos:
-        print("La API devolvió una serie vacía.", file=sys.stderr)
+        logger.error("La API devolvió una serie vacía.")
         sys.exit(1)
 
     guardar_historico(datos, args.output)
 
     primera = datos[0].get("fecha")
     ultima = datos[-1].get("fecha")
-    print(f"Guardados {len(datos):,} registros en {args.output}")
-    print(f"Rango: {primera} -> {ultima}")
+    logger.info(f"Guardados {len(datos):,} registros en {args.output}")
+    logger.info(f"Rango: {primera} -> {ultima}")
 
     # Sanity check de que las fechas estén ordenadas y sin duplicados.
     fechas = [d.get("fecha") for d in datos]
     if len(fechas) != len(set(fechas)):
-        print("Aviso: la serie contiene fechas duplicadas.", file=sys.stderr)
+        logger.warning("Aviso: la serie contiene fechas duplicadas.")
 
 
 if __name__ == "__main__":

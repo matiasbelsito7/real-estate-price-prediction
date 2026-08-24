@@ -13,6 +13,8 @@ Aplica las transformaciones en orden sobre el dataset curado:
 
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
@@ -25,6 +27,8 @@ from real_estate.features.transformations import (
     crear_target_log,
     seleccionar_columnas,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def construir_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -39,16 +43,16 @@ def construir_features(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
 
-    print("\n" + "=" * 70)
-    print("FEATURE ENGINEERING")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("FEATURE ENGINEERING")
+    logger.info("=" * 70)
 
-    print(f"\nFilas iniciales: {df.shape[0]:,} | Columnas: {df.shape[1]}")
+    logger.info("Filas iniciales: %s | Columnas: %d", f"{df.shape[0]:,}", df.shape[1])
 
     # 1. Selección de columnas
     df = seleccionar_columnas(df)
 
-    print(f"Tras seleccionar columnas: {df.shape[1]} columnas")
+    logger.info("Tras seleccionar columnas: %d columnas", df.shape[1])
 
     # 2. Target logarítmico (filtra precios inválidos)
     df = crear_target_log(df)
@@ -58,17 +62,17 @@ def construir_features(df: pd.DataFrame) -> pd.DataFrame:
         if columna in df.columns:
             orden = crear_orden_mediana(df, columna)
             df = codificar_ordinal(df, columna, orden)
-            print(f"{columna:30s} -> {len(orden)} categorías codificadas")
+            logger.info("%-30s -> %d categorías codificadas", columna, len(orden))
 
     # 4. Imputación por mediana
     imputador = crear_imputador(df)
 
     df = aplicar_imputacion(df, imputador)
 
-    print(f"Imputadas por mediana: {sorted(imputador)}")
+    logger.info("Imputadas por mediana: %s", sorted(imputador))
 
-    print(f"\nFilas finales: {df.shape[0]:,} | Columnas: {df.shape[1]}")
-    print(f"Faltantes restantes: {int(df.isna().sum().sum())}")
+    logger.info("Filas finales: %s | Columnas: %d", f"{df.shape[0]:,}", df.shape[1])
+    logger.info("Faltantes restantes: %d", int(df.isna().sum().sum()))
 
     return df
 
@@ -105,17 +109,12 @@ def dividir_train_val_test(
 def mostrar_features(df: pd.DataFrame) -> None:
     """Muestra un resumen de la matriz de features construida."""
 
-    print("\n" + "=" * 70)
-    print("MATRIZ DE FEATURES")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("MATRIZ DE FEATURES")
+    logger.info("=" * 70)
 
-    print(f"\nFilas: {df.shape[0]:,} | Columnas: {df.shape[1]}")
+    logger.info("Filas: %s | Columnas: %d", f"{df.shape[0]:,}", df.shape[1])
 
-    print("\nPrimeras filas:")
-    print(df.head().to_string())
-
-    print("\nTipos de datos:")
-    print(df.dtypes)
-
-    print("\nValores faltantes:")
-    print(df.isna().sum())
+    logger.info("Primeras filas:\n%s", df.head().to_string())
+    logger.info("Tipos de datos:\n%s", df.dtypes)
+    logger.info("Valores faltantes:\n%s", df.isna().sum())

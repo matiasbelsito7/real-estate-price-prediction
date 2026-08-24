@@ -10,11 +10,14 @@ cubiertas. Además crea indicadores de valores informados (missing indicators).
 from __future__ import annotations
 
 import csv
+import logging
 import os
 import time
 
 import pandas as pd
 import requests
+
+logger = logging.getLogger(__name__)
 
 # Mercado utilizado para convertir ARS -> USD.
 # Opciones disponibles en ArgentinaDatos:
@@ -102,7 +105,7 @@ def cargar_tipo_cambio_historico(ruta: str) -> dict[str, float]:
     """
 
     if not os.path.exists(ruta):
-        print(f"  (aviso: no existe '{ruta}'; se usará la API por fecha)")
+        logger.warning("No existe '%s'; se usará la API por fecha", ruta)
         return {}
 
     tabla: dict[str, float] = {}
@@ -115,7 +118,7 @@ def cargar_tipo_cambio_historico(ruta: str) -> dict[str, float]:
             if fecha and venta:
                 tabla[fecha] = float(venta)
 
-    print(f"  Tipo de cambio histórico cargado: {len(tabla):,} fechas ({ruta})")
+    logger.info("Tipo de cambio histórico cargado: %s fechas (%s)", f"{len(tabla):,}", ruta)
 
     return tabla
 
@@ -134,11 +137,11 @@ def construir_tabla_tipo_cambio(
 
     fechas_unicas = sorted(fechas.dropna().dt.strftime("%Y-%m-%d").unique())
 
-    print("\n" + "=" * 70)
-    print("2. OBTENIENDO TIPOS DE CAMBIO")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("2. OBTENIENDO TIPOS DE CAMBIO")
+    logger.info("=" * 70)
 
-    print(f"Fechas únicas encontradas: {len(fechas_unicas)}")
+    logger.info("Fechas únicas encontradas: %d", len(fechas_unicas))
 
     tabla_local = cargar_tipo_cambio_historico(ruta_historico) if ruta_historico else {}
 
@@ -148,10 +151,10 @@ def construir_tabla_tipo_cambio(
         tasa = tabla_local.get(fecha)
 
         if tasa is not None:
-            print(f"  {fecha} -> histórico: 1 USD = {tasa:,.2f} ARS")
+            logger.info("  %s -> histórico: 1 USD = %s ARS", fecha, f"{tasa:,.2f}")
 
         else:
-            print(f"  {fecha} -> consultando {FX_MARKET}...")
+            logger.info("  %s -> consultando %s...", fecha, FX_MARKET)
 
             tasa = obtener_tipo_cambio(fecha, FX_MARKET)
 
@@ -159,7 +162,7 @@ def construir_tabla_tipo_cambio(
             tipos_cambio[fecha] = tasa
 
         else:
-            print("      ERROR: no se encontró cotización")
+            logger.error("No se encontró cotización para %s", fecha)
 
     return tipos_cambio
 
@@ -182,9 +185,9 @@ def normalizar_moneda(
     No modifica precio ni moneda originales.
     """
 
-    print("\n" + "=" * 70)
-    print("3. NORMALIZACIÓN DE MONEDA")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("3. NORMALIZACIÓN DE MONEDA")
+    logger.info("=" * 70)
 
     if "precio" not in df.columns:
         raise ValueError("El dataset no tiene la columna 'precio'.")
@@ -226,9 +229,9 @@ def normalizar_moneda(
 
     df["precio_usd"] = pd.to_numeric(df["precio_usd"], errors="coerce")
 
-    print(f"\nPropiedades en USD: {mask_usd.sum():,}")
-    print(f"Propiedades en ARS: {mask_ars.sum():,}")
-    print(f"Precio USD calculado: {df['precio_usd'].notna().sum():,}")
+    logger.info("Propiedades en USD: %s", f"{mask_usd.sum():,}")
+    logger.info("Propiedades en ARS: %s", f"{mask_ars.sum():,}")
+    logger.info("Precio USD calculado: %s", f"{df['precio_usd'].notna().sum():,}")
 
     return df
 
@@ -263,9 +266,9 @@ def crear_indicadores_missing(df: pd.DataFrame) -> pd.DataFrame:
         banos = 2    ->  banos_informado = 1
     """
 
-    print("\n" + "=" * 70)
-    print("4. MANEJO DE VALORES FALTANTES")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("4. MANEJO DE VALORES FALTANTES")
+    logger.info("=" * 70)
 
     for column in MISSING_INDICATOR_COLUMNS:
         if column not in df.columns:
@@ -277,6 +280,6 @@ def crear_indicadores_missing(df: pd.DataFrame) -> pd.DataFrame:
 
         missing = df[column].isna().sum()
 
-        print(f"{column:30s} faltantes: {missing:,}")
+        logger.info("%-30s faltantes: %s", column, f"{missing:,}")
 
     return df

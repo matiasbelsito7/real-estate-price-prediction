@@ -22,6 +22,7 @@ inalcanzable, los endpoints de oportunidades responden 503; `/health` y
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,6 +30,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
 from real_estate.api.config import ConfiguracionServicio
@@ -45,6 +49,18 @@ from real_estate.persistencia.db import crear_engine
 from real_estate.serving.modelo import ModeloPrediccion
 
 VERSION = "0.1.0"
+
+logger = logging.getLogger(__name__)
+
+TIPOS_PROPIEDAD_CONOCIDOS: set[str] = {
+    "departamento",
+    "casa",
+    "ph",
+    "terreno",
+    "local",
+    "oficina",
+    "cochera",
+}
 
 
 def _entrada_a_dataframe(entrada: PropiedadEntrada) -> pd.DataFrame:
@@ -117,19 +133,52 @@ def crear_app(
         lifespan=lifespan,
     )
 
+    # Rate limiting: 60 requests/min por IP en /predict, libre en /health.
+    limiter = Limiter(key_func=get_remote_address)
+    app.state.limiter = limiter
+
     @app.get("/health")
     def health() -> dict[str, object]:
         modelo: ModeloPrediccion = app.state.modelo
+
+        # Check de base de datos (perezoso: solo consulta si el engine existe).
+        db_status = "no_configurado"
+        engine = getattr(app.state, "db_engine", None)
+        if engine is not None:
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("SELECT 1"))
+                db_status = "ok"
+            except Exception:
+                db_status = "no_disponible"
+
         return {
             "estado": "ok",
             "modelo": "xgboost",
             "version": app.version,
+            "base_datos": db_status,
             "metricas_xgboost_test": modelo.metadata.get("metricas_xgboost_test"),
         }
 
     @app.post("/predict", response_model=PrediccionSalida)
-    def predecir(entrada: PropiedadEntrada) -> PrediccionSalida:
+    @limiter.limit("60/minute")
+    def predecir(request: object, entrada: PropiedadEntrada) -> PrediccionSalida:
         modelo: ModeloPrediccion = app.state.modelo
+
+        if entrada.tipo_propiedad.lower() not in TIPOS_PROPIEDAD_CONOCIDOS:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Tipo de propiedad '{entrada.tipo_propiedad}' no reconocido. "
+                    f"Valores válidos: {', '.join(sorted(TIPOS_PROPIEDAD_CONOCIDOS))}"
+                ),
+            )
+
+        if entrada.barrio:
+            logger.warning(
+                "Barrio '%s' no fue validado contra el set de entrenamiento", entrada.barrio
+            )
+
         df = _entrada_a_dataframe(entrada)
 
         log_precio_usd = float(modelo.predecir_log(df)[0])

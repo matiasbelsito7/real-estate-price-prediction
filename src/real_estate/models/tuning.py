@@ -23,6 +23,7 @@ Registry: el champion se elige y registra recién en la fase 6.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -41,6 +42,8 @@ from real_estate.models.entrenamiento import (
     mostrar_metricas,
     separar_features_target,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Iteraciones por defecto de RandomizedSearchCV (trials muestreados).
 N_ITER_DEFAULT = 30
@@ -154,16 +157,18 @@ def tunear_xgboost(
     if metodo not in ("grid", "random"):
         raise ValueError(f"método de búsqueda inválido: '{metodo}' (usar 'grid' o 'random')")
 
-    print("\n" + "=" * 70)
-    print("TUNING DE HIPERPARÁMETROS DE XGBOOST")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("TUNING DE HIPERPARÁMETROS DE XGBOOST")
+    logger.info("=" * 70)
 
     ajustes = ajustar_preprocesamiento(train)
 
-    print(
-        "\nPreprocesamiento ajustado solo sobre train (sin fuga): "
-        f"{len(ajustes.ordenes)} categóricas con orden ordinal, "
-        f"{len(ajustes.imputador)} numéricas con imputación por mediana."
+    logger.info(
+        "Preprocesamiento ajustado solo sobre train (sin fuga): "
+        "%d categóricas con orden ordinal, "
+        "%d numéricas con imputación por mediana.",
+        len(ajustes.ordenes),
+        len(ajustes.imputador),
     )
 
     train_proc = aplicar_preprocesamiento(train, ajustes)
@@ -174,9 +179,13 @@ def tunear_xgboost(
     x_val, y_val = separar_features_target(val_proc)
     x_test, y_test = separar_features_target(test_proc)
 
-    print(
-        f"\nSplit: train {len(x_train):,} | val {len(x_val):,} | test {len(x_test):,}"
-        f"\nFeatures: {x_train.shape[1]} | Target: {TARGET_LOG}"
+    logger.info(
+        "Split: train %s | val %s | test %s\nFeatures: %d | Target: %s",
+        f"{len(x_train):,}",
+        f"{len(x_val):,}",
+        f"{len(x_test):,}",
+        x_train.shape[1],
+        TARGET_LOG,
     )
 
     # Referencia: XGBoost con los parámetros actuales (sin tunear).
@@ -215,7 +224,7 @@ def tunear_xgboost(
         )
         descripcion = f"RandomizedSearchCV | {n_iter} trials muestreados"
 
-    print(f"\nBúsqueda: {descripcion} | CV: {cv} folds | scoring: RMSE log")
+    logger.info("Búsqueda: %s | CV: %d folds | scoring: RMSE log", descripcion, cv)
 
     busqueda.fit(x_train, y_train)
 
@@ -231,14 +240,14 @@ def tunear_xgboost(
     cv_resultados["cv_rmse_log_std"] = cv_resultados["std_test_score"]
     cv_resultados = cv_resultados.drop(columns=["mean_test_score", "std_test_score"])
 
-    print("\nMétricas sobre VALIDACIÓN:")
+    logger.info("Métricas sobre VALIDACIÓN:")
     mostrar_metricas("default", metricas_default_val)
     mostrar_metricas("tunedo", metricas_tunedo_val)
 
-    print(f"\nMejor params: {mejor_params}")
-    print(f"Mejor RMSE log de CV: {mejor_puntaje_cv:.4f}")
+    logger.info("Mejor params: %s", mejor_params)
+    logger.info("Mejor RMSE log de CV: %.4f", mejor_puntaje_cv)
 
-    print("\nMétricas del mejor candidato sobre TEST:")
+    logger.info("Métricas del mejor candidato sobre TEST:")
     mostrar_metricas("tunedo", metricas_tunedo_test)
 
     return ResultadoTuning(

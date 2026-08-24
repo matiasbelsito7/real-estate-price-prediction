@@ -60,6 +60,12 @@ COPY --from=build /opt/venv /opt/venv
 # en el contexto al construirla (fase 13 CD).
 COPY models/modelo_precio_propiedades/ /app/models/modelo_precio_propiedades/
 
+# Usuario non-root por seguridad (no ejecuta la app como root).
+RUN groupadd --gid 1000 appuser \
+    && useradd --uid 1000 --gid appuser --create-home appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8000
 
 # Healthcheck: consulta el endpoint /health cada 30 s.

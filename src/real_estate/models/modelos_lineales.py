@@ -20,6 +20,7 @@ fase 6).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TypeAlias
 
@@ -37,6 +38,8 @@ from real_estate.models.entrenamiento import (
     mostrar_metricas,
     separar_features_target,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Regularización por defecto de Lasso y Ridge.
 ALPHA_DEFAULT = 1.0
@@ -128,16 +131,18 @@ def entrenar_y_evaluar_lineales(
     Devuelve `ResultadoLineales` con las métricas y los pipelines ajustados.
     """
 
-    print("\n" + "=" * 70)
-    print("MODELOS LINEALES (Lasso y Ridge)")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("MODELOS LINEALES (Lasso y Ridge)")
+    logger.info("=" * 70)
 
     ajustes = ajustar_preprocesamiento(train)
 
-    print(
-        "\nPreprocesamiento ajustado solo sobre train (sin fuga): "
-        f"{len(ajustes.ordenes)} categóricas con orden ordinal, "
-        f"{len(ajustes.imputador)} numéricas con imputación por mediana."
+    logger.info(
+        "Preprocesamiento ajustado solo sobre train (sin fuga): "
+        "%d categóricas con orden ordinal, "
+        "%d numéricas con imputación por mediana.",
+        len(ajustes.ordenes),
+        len(ajustes.imputador),
     )
 
     train_proc = aplicar_preprocesamiento(train, ajustes)
@@ -148,9 +153,13 @@ def entrenar_y_evaluar_lineales(
     x_val, y_val = separar_features_target(val_proc)
     x_test, y_test = separar_features_target(test_proc)
 
-    print(
-        f"\nSplit: train {len(x_train):,} | val {len(x_val):,} | test {len(x_test):,}"
-        f"\nFeatures: {x_train.shape[1]} | Target: {TARGET_LOG} | Escalado: StandardScaler"
+    logger.info(
+        "Split: train %s | val %s | test %s\nFeatures: %d | Target: %s | Escalado: StandardScaler",
+        f"{len(x_train):,}",
+        f"{len(x_val):,}",
+        f"{len(x_test):,}",
+        x_train.shape[1],
+        TARGET_LOG,
     )
 
     modelo_lasso = entrenar_lasso(
@@ -169,7 +178,7 @@ def entrenar_y_evaluar_lineales(
     metricas_lasso_val = calcular_metricas(y_val, modelo_lasso.predict(x_val))
     metricas_ridge_val = calcular_metricas(y_val, modelo_ridge.predict(x_val))
 
-    print("\nMétricas sobre VALIDACIÓN:")
+    logger.info("Métricas sobre VALIDACIÓN:")
     mostrar_metricas("lasso", metricas_lasso_val)
     mostrar_metricas("ridge", metricas_ridge_val)
 
@@ -177,8 +186,8 @@ def entrenar_y_evaluar_lineales(
     modelo_mejor = modelo_lasso if mejor == "lasso" else modelo_ridge
     metricas_mejor_test = calcular_metricas(y_test, modelo_mejor.predict(x_test))
 
-    print(f"\nMejor modelo en val: {mejor}")
-    print("\nMétricas sobre TEST (modelo final):")
+    logger.info("Mejor modelo en val: %s", mejor)
+    logger.info("Métricas sobre TEST (modelo final):")
     mostrar_metricas(mejor, metricas_mejor_test)
 
     return ResultadoLineales(

@@ -20,6 +20,7 @@ provee el servicio `postgres` del workflow de GitHub Actions.
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -42,6 +43,9 @@ from real_estate.persistencia.etl_oportunidades import (  # noqa: E402
     ejecutar_etl,
 )
 from real_estate.serving.evaluar import MODELO_DEFAULT  # noqa: E402
+from real_estate.utils.logging import configurar_logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 PROGRESO_DEFAULT = "data/raw/progreso_scrape_nuevas.json"
 
@@ -127,14 +131,14 @@ def _scrapear(args: argparse.Namespace) -> None:
     else:
         segmentos = [("global", construir_url_segmento(tipo=args.tipo))]
 
-    print(
+    logger.info(
         f"Recorro {len(segmentos)} segmento(s) en modo revisión periódica "
         "(re-escaneea aunque el progreso diga completo): "
         + ", ".join(f"'{nombre}'" for nombre, _ in segmentos)
     )
 
     for nombre_segmento, base_url in segmentos:
-        print(f"\n========== Segmento: {nombre_segmento} ==========")
+        logger.info(f"\n========== Segmento: {nombre_segmento} ==========")
         scrapear(
             output_path=args.input,
             max_paginas=args.max_paginas,
@@ -150,6 +154,7 @@ def _scrapear(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
+    configurar_logging()
     args = _construir_argumentos()
 
     if args.todos_los_barrios or args.barrios:

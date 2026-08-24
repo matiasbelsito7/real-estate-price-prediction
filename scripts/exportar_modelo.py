@@ -27,6 +27,7 @@ store local `mlruns/`.
 
 import argparse
 import json
+import logging
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -54,6 +55,9 @@ from real_estate.tracking import (  # noqa: E402
     configurar_tracking,
     registrar_resultado,
 )
+from real_estate.utils.logging import configurar_logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 OUTPUT_DEFAULT = Path("models/modelo_precio_propiedades")
 
@@ -71,7 +75,7 @@ def exportar_modelo(
     if not input_path.exists():
         raise FileNotFoundError(f"No se encontró el archivo: {input_path}")
 
-    print(f"Cargando dataset: {input_path}")
+    logger.info(f"Cargando dataset: {input_path}")
 
     df = pd.read_csv(input_path, low_memory=False)
 
@@ -81,7 +85,7 @@ def exportar_modelo(
 
     if not no_tracking:
         experimento = configurar_tracking()
-        print(f"\nTracking MLflow: experimento '{experimento}'")
+        logger.info(f"\nTracking MLflow: experimento '{experimento}'")
 
     resultado = entrenar_y_evaluar(train, val, test, random_state=random_state)
 
@@ -93,8 +97,10 @@ def exportar_modelo(
             dataset_info=str(input_path),
             split_sizes={"train": len(train), "val": len(val), "test": len(test)},
         )
-        print(f"\nChampion registrado en el Model Registry: '{MODELO_DEFAULT}' versión {version}")
-        print(f"Run MLflow: {run_id}")
+        logger.info(
+            f"\nChampion registrado en el Model Registry: '{MODELO_DEFAULT}' versión {version}"
+        )
+        logger.info(f"Run MLflow: {run_id}")
 
     # Orden de las features que el modelo espera: el de la matriz preprocesada.
     train_proc = aplicar_preprocesamiento(train, resultado.ajustes)
@@ -123,12 +129,14 @@ def exportar_modelo(
         metadata=metadata,
     )
 
-    print("\n" + "=" * 70)
-    print("BUNDLE DE SERVING EXPORTADO")
-    print("=" * 70)
-    print(f"\nDirectorio: {ruta}")
-    print(f"Features: {len(columnas_features)}")
-    print("Archivos: modelo_xgboost.json, preprocesamiento.json, features.json, metadata.json")
+    logger.info("\n" + "=" * 70)
+    logger.info("BUNDLE DE SERVING EXPORTADO")
+    logger.info("=" * 70)
+    logger.info(f"\nDirectorio: {ruta}")
+    logger.info(f"Features: {len(columnas_features)}")
+    logger.info(
+        "Archivos: modelo_xgboost.json, preprocesamiento.json, features.json, metadata.json"
+    )
 
     resumen = ruta / "resumen_bundle.json"
     resumen.write_text(
@@ -137,12 +145,13 @@ def exportar_modelo(
         ),
         encoding="utf-8",
     )
-    print(f"Resumen: {resumen}")
+    logger.info(f"Resumen: {resumen}")
 
     return ruta
 
 
 def main() -> None:
+    configurar_logging()
     parser = argparse.ArgumentParser(
         description=(
             "Exporta el bundle de serving (modelo XGBoost + preprocesamiento) "

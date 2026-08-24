@@ -14,6 +14,7 @@ Aplica las etapas en orden sobre un DataFrame:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -30,28 +31,27 @@ from real_estate.curation.transformations import (
 )
 from real_estate.curation.validation import validar
 
+logger = logging.getLogger(__name__)
+
 
 def mostrar_dataset(df: pd.DataFrame) -> None:
     """Muestra información general del dataset original."""
 
-    print("\n" + "=" * 70)
-    print("DATASET ORIGINAL")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("DATASET ORIGINAL")
+    logger.info("=" * 70)
 
-    print(f"\nFilas:    {df.shape[0]:,}")
-    print(f"Columnas: {df.shape[1]}")
+    logger.info("Filas:    %s", f"{df.shape[0]:,}")
+    logger.info("Columnas: %d", df.shape[1])
 
-    print("\nColumnas:")
+    logger.info("Columnas:")
     for column in df.columns:
-        print(f"  - {column}")
+        logger.info("  - %s", column)
 
-    print("\nPrimeras filas:")
-    print(df.head())
+    logger.info("Primeras filas:\n%s", df.head())
+    logger.info("Tipos de datos:\n%s", df.dtypes)
 
-    print("\nTipos de datos:")
-    print(df.dtypes)
-
-    print("\nValores faltantes:")
+    logger.info("Valores faltantes:")
     missing = df.isna().sum()
     missing_percentage = df.isna().mean() * 100
 
@@ -62,7 +62,7 @@ def mostrar_dataset(df: pd.DataFrame) -> None:
         }
     )
 
-    print(missing_table)
+    logger.info("\n%s", missing_table)
 
 
 def curar_dataset(df: pd.DataFrame) -> pd.DataFrame:
@@ -95,20 +95,17 @@ def curar_dataset(df: pd.DataFrame) -> pd.DataFrame:
 def mostrar_dataset_curado(df: pd.DataFrame) -> None:
     """Muestra información general del dataset curado."""
 
-    print("\n" + "=" * 70)
-    print("DATASET CURADO")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("DATASET CURADO")
+    logger.info("=" * 70)
 
-    print(f"\nFilas:    {df.shape[0]:,}")
-    print(f"Columnas: {df.shape[1]}")
+    logger.info("Filas:    %s", f"{df.shape[0]:,}")
+    logger.info("Columnas: %d", df.shape[1])
 
-    print("\nPrimeras filas:")
-    print(df.head().to_string())
+    logger.info("Primeras filas:\n%s", df.head().to_string())
+    logger.info("Tipos de datos:\n%s", df.dtypes)
 
-    print("\nTipos de datos:")
-    print(df.dtypes)
-
-    print("\nValores faltantes:")
+    logger.info("Valores faltantes:")
     missing = pd.DataFrame(
         {
             "missing": df.isna().sum(),
@@ -116,7 +113,7 @@ def mostrar_dataset_curado(df: pd.DataFrame) -> None:
         }
     )
 
-    print(missing)
+    logger.info("\n%s", missing)
 
 
 def curar_csv(input_file: str | Path, output_file: str | Path) -> None:
@@ -128,7 +125,7 @@ def curar_csv(input_file: str | Path, output_file: str | Path) -> None:
     if not input_path.exists():
         raise FileNotFoundError(f"No se encontró el archivo: {input_path}")
 
-    print(f"Cargando dataset: {input_path}")
+    logger.info("Cargando dataset: %s", input_path)
 
     df = pd.read_csv(input_path, low_memory=False)
 
@@ -142,8 +139,8 @@ def curar_csv(input_file: str | Path, output_file: str | Path) -> None:
 
     df.to_csv(output_path, index=False)
 
-    print("\n" + "=" * 70)
-    print("CURADO FINALIZADO")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("CURADO FINALIZADO")
+    logger.info("=" * 70)
 
-    print(f"\nDataset curado guardado en:\n{output_path}")
+    logger.info("Dataset curado guardado en: %s", output_path)

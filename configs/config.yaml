@@ -1,0 +1,79 @@
+# ============================================================
+# Configuración centralizada del proyecto
+# ============================================================
+# Carga por pydantic-settings en src/real_estate/utils/config.py.
+# Cada sección agrupa los parámetros de una capa del pipeline.
+# Las variables de entorno / .env tienen prioridad sobre estos valores.
+# ============================================================
+
+# --- Scraper (ingestion) ---
+scraper:
+  delay_min: 1.0          # Pausa mínima entre requests (segundos)
+  delay_max: 3.0          # Pausa máxima entre requests (segundos)
+  timeout: 20             # Timeout de cada request HTTP (segundos)
+  reintentos_202: 5       # Reintentos ante HTTP 202 (backoff exponencial)
+  backoff_202_inicial: 15.0  # Backoff inicial para 202 (segundos)
+  pausa_bloqueo: 300.0    # Pausa larga tras bloqueo sostenido (segundos)
+  max_paginas: null        # Límite de páginas por segmento (null = sin límite)
+
+# --- Data Curation ---
+curation:
+  fx_market: "blue"       # Mercado de dólar para ARS -> USD (blue, oficial, etc.)
+  ruta_tipo_cambio_historico: "data/external/tipo_cambio_blue.csv"
+
+# --- Feature Engineering ---
+features:
+  precio_minimo_usd: 1000   # Precios menores se descartan (artefactos de scraping)
+  split_random_state: 42    # Semilla para train/val/test split
+  test_size: 0.2            # Proporción de test
+  val_size: 0.5             # Proporción de val (del 20% de test)
+
+# --- Modelos ---
+models:
+  xgboost:
+    n_estimators: 300
+    max_depth: 4
+    learning_rate: 0.05
+    subsample: 0.8
+    colsample_bytree: 0.8
+    min_child_weight: 3
+    reg_lambda: 1.0
+    random_state: 42
+
+  lasso:
+    alpha: 1.0
+    max_iter: 10000
+    random_state: 42
+
+  ridge:
+    alpha: 1.0
+    max_iter: 10000
+    random_state: 42
+
+# --- Tuning ---
+tuning:
+  n_iter: 30               # Trials para RandomizedSearchCV
+  cv: 3                     # Folds de validación cruzada
+  metodo: "random"          # "grid" o "random"
+
+# --- MLflow Tracking ---
+tracking:
+  experimento: "prediccion_precios_propiedades"
+  modelo_registry: "modelo_precio_propiedades"
+  uri: "mlruns"            # Tracking URI local (store de archivos)
+
+# --- Clasificación de oportunidades ---
+clasificacion:
+  umbral_precio_justo: 0.10  # ±10% → precio_justo; fuera → buena/mala compra
+
+# --- Serving / API ---
+serving:
+  modelo_dir: "models/modelo_precio_propiedades"
+
+# --- PostgreSQL (ETL periódico) ---
+postgres:
+  host: "localhost"
+  port: 5432
+  user: "realestate"
+  password: "realestate"
+  db: "real_estate"

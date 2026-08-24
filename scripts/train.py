@@ -23,6 +23,7 @@ store local `mlruns/`.
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -44,6 +45,9 @@ from real_estate.tracking import (  # noqa: E402
     configurar_tracking,
     registrar_resultado,
 )
+from real_estate.utils.logging import configurar_logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 def entrenar_pipeline(
@@ -58,7 +62,7 @@ def entrenar_pipeline(
     if not input_path.exists():
         raise FileNotFoundError(f"No se encontró el archivo: {input_path}")
 
-    print(f"Cargando dataset: {input_path}")
+    logger.info(f"Cargando dataset: {input_path}")
 
     df = pd.read_csv(input_path, low_memory=False)
 
@@ -68,7 +72,7 @@ def entrenar_pipeline(
 
     if not no_tracking:
         experimento = configurar_tracking()
-        print(f"\nTracking MLflow: experimento '{experimento}'")
+        logger.info(f"\nTracking MLflow: experimento '{experimento}'")
 
     resultado = entrenar_y_evaluar(train, val, test, random_state=random_state)
 
@@ -80,15 +84,16 @@ def entrenar_pipeline(
             dataset_info=str(input_path),
             split_sizes={"train": len(train), "val": len(val), "test": len(test)},
         )
-        print(f"Run MLflow: {run_id}")
-        print(f"Modelo registrado en el Model Registry: '{MODELO_DEFAULT}' versión {version}")
+        logger.info(f"Run MLflow: {run_id}")
+        logger.info(f"Modelo registrado en el Model Registry: '{MODELO_DEFAULT}' versión {version}")
 
-    print("\n" + "=" * 70)
-    print("MODELADO FINALIZADO (fases 5 y 6)")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("MODELADO FINALIZADO (fases 5 y 6)")
+    logger.info("=" * 70)
 
 
 def main() -> None:
+    configurar_logging()
     parser = argparse.ArgumentParser(
         description=(
             "Modelado: pipeline train/val/test sin fuga, baseline (mediana), "

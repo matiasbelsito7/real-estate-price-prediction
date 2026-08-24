@@ -1,4 +1,4 @@
-.PHONY: help install install-dev scrape curate features train train-lineales tuning compare export-model publicar-champion etl serve docker-build docker-up docker-down docker-logs dvc-repro dvc-push dvc-pull dvc-status format lint typecheck test coverage check clean
+.PHONY: help install install-dev scrape curate features train train-lineales tuning compare export-model publicar-champion etl evaluate explain serve docker-build docker-up docker-down docker-logs dvc-repro dvc-push dvc-pull dvc-status format lint typecheck test coverage check clean
 
 
 # ============================================================
@@ -28,6 +28,8 @@ help:
 	@echo "  make train-lineales  Run Linear Models Training (scripts/train_lineales.py)"
 	@echo "  make tuning         Run XGBoost hyperparameter tuning (scripts/train_tuning.py)"
 	@echo "  make compare        Compare MLflow runs and pick champion (scripts/comparar_runs.py)"
+	@echo "  make evaluate      Deep model evaluation with detailed metrics (scripts/evaluate.py)"
+	@echo "  make explain       SHAP explainability analysis (scripts/explain.py)"
 	@echo "  make export-model  Export serving bundle (scripts/exportar_modelo.py)"
 	@echo "  make publicar-champion  Publish champion + fingerprint CD (scripts/publicar_champion.py)"
 	@echo "  make etl           Run periodic ETL: scrape + predict + persist (Fase 12)"
@@ -97,6 +99,14 @@ tuning:
 
 compare:
 	$(PYTHON) scripts/comparar_runs.py $(ARGS)
+
+
+evaluate:
+	$(PYTHON) scripts/evaluate.py $(ARGS)
+
+
+explain:
+	$(PYTHON) scripts/explain.py $(ARGS)
 
 
 export-model:

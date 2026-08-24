@@ -206,6 +206,17 @@ class TestPredict:
         assert respuesta.status_code == 200
         assert respuesta.json()["precio_usd"] > 0
 
+    def test_tipo_propiedad_desconocido_devuelve_422(self, client: TestClient) -> None:
+        payload = {**PAYLOAD_VALIDO, "tipo_propiedad": "garage"}
+        respuesta = client.post("/predict", json=payload)
+        assert respuesta.status_code == 422
+
+    def test_barrio_desconocido_registra_warning(self, client: TestClient) -> None:
+        payload = {**PAYLOAD_VALIDO, "barrio": "BarrioInexistente"}
+        respuesta = client.post("/predict", json=payload)
+        # Barrio desconocido no falla, solo loguea warning
+        assert respuesta.status_code == 200
+
     def test_faltan_campos_requeridos_devuelve_422(self, client: TestClient) -> None:
         respuesta = client.post("/predict", json={"barrio": "Palermo"})
 

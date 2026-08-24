@@ -18,6 +18,7 @@ MLflow queda para la fase 6.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
@@ -35,6 +36,8 @@ from real_estate.features.transformations import (
     crear_imputador,
     crear_orden_mediana,
 )
+
+logger = logging.getLogger(__name__)
 
 # Parámetros por defecto de XGBoost (razonables para datos tabulares con
 # ~1.600 filas de train; se pueden sobrescribir vía `entrenar_xgboost`).
@@ -158,12 +161,14 @@ def calcular_metricas(
 
 
 def mostrar_metricas(nombre: str, metricas: dict[str, float]) -> None:
-    """Imprime las métricas con formato (RMSE log, RMSE USD y R²)."""
+    """Logea las métricas con formato (RMSE log, RMSE USD y R²)."""
 
-    print(
-        f"  {nombre:12s} | RMSE log: {metricas['rmse_log']:.4f} "
-        f"| RMSE USD: {metricas['rmse_usd']:>12,.0f} "
-        f"| R²: {metricas['r2']:.4f}"
+    logger.info(
+        "  %12s | RMSE log: %.4f | RMSE USD: %12s | R²: %.4f",
+        nombre,
+        metricas["rmse_log"],
+        f"{metricas['rmse_usd']:,.0f}",
+        metricas["r2"],
     )
 
 
@@ -219,16 +224,18 @@ def entrenar_y_evaluar(
     ajustados (para análisis posterior, p. ej. SHAP en la fase 7).
     """
 
-    print("\n" + "=" * 70)
-    print("ENTRENAMIENTO Y EVALUACIÓN")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("ENTRENAMIENTO Y EVALUACIÓN")
+    logger.info("=" * 70)
 
     ajustes = ajustar_preprocesamiento(train)
 
-    print(
-        "\nPreprocesamiento ajustado solo sobre train (sin fuga): "
-        f"{len(ajustes.ordenes)} categóricas con orden ordinal, "
-        f"{len(ajustes.imputador)} numéricas con imputación por mediana."
+    logger.info(
+        "Preprocesamiento ajustado solo sobre train (sin fuga): "
+        "%d categóricas con orden ordinal, "
+        "%d numéricas con imputación por mediana.",
+        len(ajustes.ordenes),
+        len(ajustes.imputador),
     )
 
     train_proc = aplicar_preprocesamiento(train, ajustes)
@@ -239,9 +246,13 @@ def entrenar_y_evaluar(
     x_val, y_val = separar_features_target(val_proc)
     x_test, y_test = separar_features_target(test_proc)
 
-    print(
-        f"\nSplit: train {len(x_train):,} | val {len(x_val):,} | test {len(x_test):,}"
-        f"\nFeatures: {x_train.shape[1]} | Target: {TARGET_LOG}"
+    logger.info(
+        "Split: train %s | val %s | test %s\nFeatures: %d | Target: %s",
+        f"{len(x_train):,}",
+        f"{len(x_val):,}",
+        f"{len(x_test):,}",
+        x_train.shape[1],
+        TARGET_LOG,
     )
 
     modelo_baseline = entrenar_baseline(x_train, y_train)
@@ -256,7 +267,7 @@ def entrenar_y_evaluar(
     metricas_xgboost_val = calcular_metricas(y_val, modelo_xgboost.predict(x_val))
     metricas_xgboost_test = calcular_metricas(y_test, modelo_xgboost.predict(x_test))
 
-    print("\nMétricas sobre VALIDACIÓN:")
+    logger.info("Métricas sobre VALIDACIÓN:")
     mostrar_metricas("baseline", metricas_baseline_val)
     mostrar_metricas("xgboost", metricas_xgboost_val)
 
@@ -266,10 +277,10 @@ def entrenar_y_evaluar(
         else "baseline"
     )
 
-    print(f"\nMejor modelo en val: {mejor}")
+    logger.info("Mejor modelo en val: %s", mejor)
 
     if mejor == "xgboost":
-        print("\nMétricas de XGBoost sobre TEST (modelo final):")
+        logger.info("Métricas de XGBoost sobre TEST (modelo final):")
         mostrar_metricas("xgboost", metricas_xgboost_test)
 
     return ResultadoEntrenamiento(
