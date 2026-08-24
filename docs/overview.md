@@ -35,7 +35,7 @@ Model Evaluation (métricas detalladas, residuos, segmentos, sesgo)
       ↓
 Explainability (SHAP: valores, importancia, figuras)
       ↓
-Serving (bundle de predicción + API FastAPI)
+Serving (bundle de predicción + API FastAPI + Frontend)
       ↓
 ETL periódico (scrape + predicción + clasificación + PostgreSQL)
       ↓
@@ -82,6 +82,7 @@ El proyecto exige **calidad de software además de calidad de Machine Learning**
 | CI/CD | GitHub Actions | ✔ |
 | Containerization | Docker, Docker Compose | ✔ |
 | API / Serving | FastAPI, Uvicorn | ✔ |
+| Frontend | HTML5, CSS3, JavaScript vanilla | ✔ |
 | Configuración | Pydantic Settings, python-dotenv, PyYAML | ✔ |
 | Rate limiting | SlowAPI | ✔ |
 | Base de datos | PostgreSQL, SQLAlchemy 2.0 (Core), psycopg | ✔ |

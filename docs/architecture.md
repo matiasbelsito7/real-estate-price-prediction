@@ -35,8 +35,13 @@ real-estate-price-prediction/
 │   ├── explainability/            ✔ SHAP analysis
 │   ├── evaluacion/                ✔ Métricas detalladas, residuos
 │   ├── serving/                   ✔ Bundle, predicción, clasificación, ETL
-│   ├── api/                       ✔ FastAPI (health, predict, oportunidades)
+│   ├── api/                       ✔ FastAPI (health, predict, oportunidades, explain)
 │   └── persistencia/              ✔ PostgreSQL (config, db, esquema, repo)
+│
+├── frontend/                      ✔ Frontend estático (HTML/CSS/JS)
+│   ├── index.html                 ✔ Tabla de oportunidades + modal SHAP
+│   ├── style.css                  ✔ Diseño responsive
+│   └── app.js                     ✔ Lógica: fetch, render, auto-refresh
 │
 ├── scripts/                       ✔ Entry points CLI (16 scripts)
 ├── tests/                         ✔ Unit (15 archivos) + integration (4)
@@ -145,9 +150,19 @@ real-estate-price-prediction/
 
 | Módulo | Responsabilidad |
 |---|---|
-| `app.py` | FastAPI: lifespan, /health, /predict, /oportunidades, rate limiting |
-| `schemas.py` | Pydantic models: entrada, predicción, oportunidad |
+| `app.py` | FastAPI: lifespan, /health, /predict, /oportunidades, /oportunidades/{id}/explain, rate limiting, frontend estático |
+| `schemas.py` | Pydantic models: entrada, predicción, oportunidad, explicación SHAP |
 | `config.py` | `ConfiguracionServicio` (directorio del modelo) |
+
+### 2.12 Frontend (`frontend/`)
+
+| Archivo | Responsabilidad |
+|---|---|
+| `index.html` | Página principal: tabla de oportunidades, filtros, modal de explicabilidad |
+| `style.css` | Diseño responsive con variables CSS, badges de clasificación |
+| `app.js` | Lógica: fetch API, renderizado, auto-refresh cada 30s, modales SHAP |
+
+**Servido por FastAPI** como archivos estáticos en `/frontend/`. El endpoint raíz `/` redirige al frontend.
 
 ### 2.12 Persistencia (`src/real_estate/persistencia/`)
 
@@ -177,7 +192,7 @@ real-estate-price-prediction/
 | `explain.py` | `make explain` | Explicabilidad SHAP |
 | `evaluar_nuevas.py` | — | Predicción sobre nuevas |
 | `clasificar_ofertas.py` | — | Clasificación oportunidades |
-| `etl_oportunidades.py` | `make etl` | ETL periódico |
+| `etl_oportunidades.py` | `make etl` / `make etl-scrape` | ETL periódico (con/sin scraping) |
 | `download_tipo_cambio.py` | — | Descargar histórico dólar |
 
 ### 2.14 Tests
@@ -191,9 +206,9 @@ real-estate-price-prediction/
 
 | Ruta | Contenido | Estado |
 |---|---|---|
-| `data/raw/propiedades_argenprop.csv` | Dataset crudo, 2.005 registros | ✔ |
-| `data/processed/..._curado.csv` | Curado, 32 columnas | ✔ |
-| `data/processed/..._features.csv` | Features, 16 columnas | ✔ |
+| `data/raw/propiedades_argenprop.csv` | Dataset crudo, 2.146 registros | ✔ |
+| `data/processed/..._curado.csv` | Curado, 2.146 filas × 32 columnas | ✔ |
+| `data/processed/..._features.csv` | Features, 2.140 filas × 16 columnas | ✔ |
 | `data/external/tipo_cambio_blue.csv` | Histórico dólar blue, 5.702 fechas | ✔ |
 
 ---

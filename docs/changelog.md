@@ -5,6 +5,36 @@
 
 ---
 
+## [Unreleased] — 2026-08-24
+
+### Added
+
+#### 13. Frontend con explicabilidad SHAP y auto-refresh
+
+**Problema:** no había interfaz visual para explorar las oportunidades de compra
+ni para entender por qué el modelo predijo un precio específico.
+
+**Solución:**
+- Creado `frontend/index.html` — tabla de oportunidades con filtros y modal
+- Creado `frontend/style.css` — diseño responsive con variables CSS
+- Creado `frontend/app.js` — lógica: fetch API, renderizado, auto-refresh 30s
+- Nuevo endpoint `GET /oportunidades/{id}/explain` — SHAP values por publicación
+- Raw features (superficie, ambientes, etc.) almacenadas en tabla `oportunidades`
+- Esquemas Pydantic: `ExplicacionFeature`, `ExplicacionPublicacion`
+- Tests: 4 tests para endpoint explain
+
+#### 14. Comandos Makefile para frontend y ETL
+
+**Problema:** faltaban targets para el scraping de CABA completo y para
+servir el frontend.
+
+**Solución:**
+- `make etl-scrape` — ETL con scraping de todos los barrios de CABA
+- `make serve` — FastAPI + Frontend en `0.0.0.0:8000`
+- `make serve-api` — Solo FastAPI (sin frontend)
+
+---
+
 ## [Unreleased] — 2026-08-23
 
 ### Added

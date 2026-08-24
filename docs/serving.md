@@ -12,9 +12,10 @@ make export-model
     ↓
 models/modelo_precio_propiedades/ (bundle)
     ↓
-make serve (FastAPI)
+make serve (FastAPI + Frontend)
     ↓
-/health  /predict  /oportunidades
+/  →  Frontend (HTML/CSS/JS)
+/health  /predict  /oportunidades  /oportunidades/{id}/explain
     ↓
 make docker-build → make docker-up
     ↓
@@ -61,10 +62,12 @@ MLflow loguea solo el XGBoost (sin firma de preprocesamiento); el
 
 | Método | Ruta | Descripción |
 |---|---|---|
+| GET | `/` | Frontend (redirige a `/frontend/index.html`) |
 | GET | `/health` | Estado, modelo, versión, métricas, estado de DB |
 | POST | `/predict` | Predicción de precio (14 features) |
 | GET | `/oportunidades` | Lista de oportunidades (paginado, filtros) |
 | GET | `/oportunidades/{id}` | Detalle de una oportunidad |
+| GET | `/oportunidades/{id}/explain` | Explicabilidad SHAP de una publicación |
 
 ### Rate limiting
 
@@ -85,6 +88,45 @@ MLflow loguea solo el XGBoost (sin firma de preprocesamiento); el
 - 6 numéricas imputables: `superficie_cubierta`, `ambientes`, `dormitorios`, `banos`, `antiguedad`, `expensas_usd`
 - 6 indicadores `*_informado`
 - 2 ordinales: `barrio_ordinal`, `tipo_propiedad_ordinal`
+
+---
+
+## 2.5 Frontend
+
+**Directorio:** `frontend/`
+**Target Makefile:** `make serve` (incluido en FastAPI)
+
+### Funcionalidades
+
+- **Tabla de oportunidades** con clasificación, precios y diferencia porcentual
+- **Filtros** por clasificación y barrio
+- **Paginación** y ordenamiento por columnas
+- **Modal de explicabilidad SHAP** por publicación
+- **Auto-refresh** cada 30 segundos
+- **Diseño responsive** (mobile-friendly)
+
+### Tecnologías
+
+- HTML5, CSS3 (variables CSS), JavaScript vanilla
+- Sin dependencias externas (Framework-free)
+- Fetch API para comunicación con FastAPI
+
+### Rutas
+
+| Ruta | Descripción |
+|---|---|
+| `GET /` | Redirige al frontend |
+| `GET /frontend/index.html` | Página principal |
+| `GET /frontend/style.css` | Estilos |
+| `GET /frontend/app.js` | Lógica JavaScript |
+
+### Explicabilidad SHAP
+
+El botón "Explicar" en cada fila abre un modal con:
+- Precio predicho por el modelo
+- Resumen legible de contribuciones
+- Barras de contribución por feature (verde = aumenta precio, rojo = reduce)
+- Features ordenadas por importancia absoluta
 
 ---
 
@@ -144,6 +186,12 @@ make docker-logs     # sigue los logs
 | `modelo_version` | String | Versión del modelo usado |
 | `fecha_prediccion` | Date | Fecha de la predicción |
 | `actualizado_en` | Timestamp | Última actualización |
+| `superficie_cubierta` | Float | Superficie cubierta (m²) — para SHAP |
+| `ambientes` | Float | Cantidad de ambientes — para SHAP |
+| `dormitorios` | Float | Cantidad de dormitorios — para SHAP |
+| `banos` | Float | Cantidad de baños — para SHAP |
+| `antiguedad` | Float | Antigüedad (años) — para SHAP |
+| `expensas_usd` | Float | Expensas mensuales USD — para SHAP |
 
 ### Upsert multi-dialecto
 
