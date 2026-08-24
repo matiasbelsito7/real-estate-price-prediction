@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real Estate Predictor - Oportunidades de Compra</title>
+    <link rel="stylesheet" href="/frontend/style.css">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>Real Estate Predictor</h1>
+            <p class="subtitle">Análisis de oportunidades de compra en CABA</p>
+            <div class="status-bar">
+                <span id="status-indicator" class="status-dot"></span>
+                <span id="status-text">Conectando...</span>
+                <span id="last-update"></span>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- Filtros -->
+        <section class="filters">
+            <div class="filter-group">
+                <label for="filter-clasificacion">Clasificación:</label>
+                <select id="filter-clasificacion">
+                    <option value="">Todas</option>
+                    <option value="buena_compra">Buena compra</option>
+                    <option value="precio_justo">Precio justo</option>
+                    <option value="mala_compra">Mala compra</option>
+                    <option value="sin_clasificar">Sin clasificar</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="filter-barrio">Barrio:</label>
+                <input type="text" id="filter-barrio" placeholder="Ej: Palermo, Caballito...">
+            </div>
+            <div class="filter-group">
+                <button id="btn-refresh" class="btn btn-primary">Actualizar</button>
+            </div>
+        </section>
+
+        <!-- Resumen -->
+        <section class="summary" id="summary">
+            <div class="summary-card">
+                <span class="summary-value" id="total-count">0</span>
+                <span class="summary-label">Total</span>
+            </div>
+            <div class="summary-card buena">
+                <span class="summary-value" id="buena-count">0</span>
+                <span class="summary-label">Buena compra</span>
+            </div>
+            <div class="summary-card justa">
+                <span class="summary-value" id="justo-count">0</span>
+                <span class="summary-label">Precio justo</span>
+            </div>
+            <div class="summary-card mala">
+                <span class="summary-value" id="mala-count">0</span>
+                <span class="summary-label">Mala compra</span>
+            </div>
+        </section>
+
+        <!-- Tabla de oportunidades -->
+        <section class="table-container">
+            <table id="oportunidades-table">
+                <thead>
+                    <tr>
+                        <th class="sortable" data-sort="clasificacion">Clasificación</th>
+                        <th class="sortable" data-sort="barrio">Barrio</th>
+                        <th>Tipo</th>
+                        <th class="sortable" data-sort="precio_usd">Precio USD</th>
+                        <th class="sortable" data-sort="precio_predicho_usd">Predicho USD</th>
+                        <th class="sortable" data-sort="diferencia_porcentual">Diferencia %</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody id="oportunidades-body">
+                    <tr>
+                        <td colspan="7" class="loading">Cargando datos...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- Paginación -->
+        <section class="pagination">
+            <button id="btn-prev" class="btn btn-secondary" disabled>← Anterior</button>
+            <span id="page-info">Página 1</span>
+            <button id="btn-next" class="btn btn-secondary">Siguiente →</button>
+        </section>
+    </main>
+
+    <!-- Modal de explicabilidad -->
+    <div id="explain-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Explicación de Predicción</h2>
+                <button class="modal-close" id="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="explanation-summary" id="explanation-summary"></div>
+                <div class="explanation-details" id="explanation-details">
+                    <p class="loading">Calculando explicación...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Real Estate Price Prediction - Powered by XGBoost + SHAP</p>
+    </footer>
+
+    <script src="/frontend/app.js"></script>
+</body>
+</html>

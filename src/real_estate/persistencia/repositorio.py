@@ -40,6 +40,13 @@ COLUMNAS_OPORTUNIDADES = [
     "diferencia_porcentual",
     "clasificacion",
     "fecha_prediccion",
+    # Raw features para explicabilidad SHAP
+    "superficie_cubierta",
+    "ambientes",
+    "dormitorios",
+    "banos",
+    "antiguedad",
+    "expensas_usd",
 ]
 
 

@@ -1,5 +1,5 @@
 """
-Aplicación FastAPI de predicción de precios de propiedades (Fases 10 y 12).
+Aplicación FastAPI de predicción de precios de propiedades (Fases 10, 12 y Frontend).
 
 Endpoints:
 
@@ -8,6 +8,7 @@ Endpoints:
 - `GET /oportunidades`: listado paginado de las oportunidades que persiste el
   ETL periódico en PostgreSQL, filtrable por clasificación y barrio.
 - `GET /oportunidades/{id}`: una oportunidad por su id.
+- `GET /oportunidades/{id}/explain`: explicabilidad SHAP de una publicación.
 
 El modelo (bundle de serving) se carga en el *lifespan* de la app desde
 `MODELO_DIR` (ver `ConfiguracionServicio`). Si el bundle no existe, la app no
@@ -18,11 +19,14 @@ y, si no se pasa, la lee de variables de entorno / `.env`. El engine se crea
 perezosamente (no conecta al arrancar). Si no hay base configurada o es
 inalcanzable, los endpoints de oportunidades responden 503; `/health` y
 `/predict` no dependen de la base.
+
+El frontend se sirve como archivos estáticos desde `/frontend/`.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -30,6 +34,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import text
@@ -39,6 +45,8 @@ from starlette.requests import Request
 from real_estate.api.config import ConfiguracionServicio
 from real_estate.api.schemas import (
     COLUMNAS_NUMERICAS_INFORMADO,
+    ExplicacionFeature,
+    ExplicacionPublicacion,
     Oportunidad,
     PrediccionSalida,
     PropiedadEntrada,
@@ -49,7 +57,7 @@ from real_estate.persistencia.config import ConfiguracionPostgres
 from real_estate.persistencia.db import crear_engine
 from real_estate.serving.modelo import ModeloPrediccion
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +70,18 @@ TIPOS_PROPIEDAD_CONOCIDOS: set[str] = {
     "oficina",
     "cochera",
 }
+
+# Columnas raw features que se usan para SHAP (orden del modelo)
+RAW_FEATURES = [
+    "superficie_cubierta",
+    "ambientes",
+    "dormitorios",
+    "banos",
+    "antiguedad",
+    "expensas_usd",
+]
+
+FRONTEND_DIR = Path(__file__).resolve().parents[2] / "frontend"
 
 
 def _entrada_a_dataframe(entrada: PropiedadEntrada) -> pd.DataFrame:
@@ -76,11 +96,116 @@ def _entrada_a_dataframe(entrada: PropiedadEntrada) -> pd.DataFrame:
         valor = getattr(entrada, columna)
         informado = getattr(entrada, indicador)
         fila[columna] = valor
-        # Si no se informó el indicador, se deriva de la presencia del valor,
-        # igual que en la etapa de features (0 = ausente, 1 = informado).
         fila[indicador] = informado if informado is not None else (1 if valor is not None else 0)
 
     return pd.DataFrame([fila])
+
+
+def _oportunidad_a_dataframe(oportunidad: dict[str, object]) -> pd.DataFrame:
+    """Convierte una oportunidad de la DB en DataFrame para predecir."""
+
+    fila: dict[str, object] = {
+        "tipo_propiedad": oportunidad.get("tipo_propiedad", ""),
+        "barrio": oportunidad.get("barrio", ""),
+    }
+
+    # Agregar raw features y sus indicadores _informado (usar mapping de schemas)
+    from real_estate.api.schemas import COLUMNAS_NUMERICAS_INFORMADO
+
+    for columna, indicador in COLUMNAS_NUMERICAS_INFORMADO:
+        valor = oportunidad.get(columna)
+        fila[columna] = valor
+        fila[indicador] = (
+            1 if valor is not None and not (isinstance(valor, float) and math.isnan(valor)) else 0
+        )
+
+    # Agregar columnas faltantes que el modelo espera (serán descartadas por seleccionar_columnas)
+    for col in [
+        "cocheras",
+        "superficie_semicubierta",
+        "superficie_total",
+        "sub_barrio",
+        "link",
+        "titulo",
+        "descripcion",
+        "fecha_scrape",
+        "id",
+        "idtipopropiedad",
+        "precio",
+        "moneda",
+        "tipo_cambio_ars_usd",
+        "expensas",
+        "cocheras_informado",
+        "superficie_semicubierta_informado",
+        "superficie_total_informado",
+    ]:
+        if col not in fila:
+            fila[col] = None
+
+    return pd.DataFrame([fila])
+
+
+def _construir_explicacion(
+    modelo: ModeloPrediccion,
+    oportunidad: dict[str, object],
+) -> ExplicacionPublicacion:
+    """Calcula los valores SHAP para una publicación."""
+
+    from real_estate.explainability.shap_analysis import calcular_shap
+
+    df = _oportunidad_a_dataframe(oportunidad)
+
+    # Predecir
+    log_precio = float(modelo.predecir_log(df)[0])
+    precio_usd = float(np.exp(log_precio))
+
+    # Calcular SHAP
+    x_matriz = modelo._construir_matriz(df)
+    explicacion = calcular_shap(modelo.modelo_xgboost, x_matriz)
+
+    # Extraer contribuciones de la primera (única) fila
+    valores_shap = explicacion.valores[0]
+    base = explicacion.base
+
+    features = []
+    for i, nombre in enumerate(explicacion.nombres):
+        valor_raw = x_matriz.iloc[0, i]
+        valor = float(str(valor_raw)) if valor_raw is not None else 0.0
+        contrib = float(valores_shap[i])
+        contrib_usd = float(np.exp(contrib) - 1) * 100  # % de impacto
+        features.append(
+            ExplicacionFeature(
+                nombre=nombre,
+                valor=valor,
+                contribucion=round(contrib, 4),
+                contribucion_usd=round(contrib_usd, 1),
+            )
+        )
+
+    # Ordenar por importancia absoluta
+    features.sort(key=lambda f: abs(f.contribucion), reverse=True)
+
+    # Generar resumen
+    top_positivas = [f for f in features if f.contribucion > 0][:3]
+    top_negativas = [f for f in features if f.contribucion < 0][:3]
+
+    partes = []
+    if top_positivas:
+        positivos = ", ".join(f"{f.nombre} (+{f.contribucion_usd}%)" for f in top_positivas)
+        partes.append(f"Aumenta el precio: {positivos}")
+    if top_negativas:
+        negativos = ", ".join(f"{f.nombre} ({f.contribucion_usd}%)" for f in top_negativas)
+        partes.append(f"Reduce el precio: {negativos}")
+
+    resumen = "; ".join(partes) if partes else "Sin contribuciones significativas"
+
+    return ExplicacionPublicacion(
+        id=str(oportunidad.get("id", "")),
+        precio_predicho_usd=round(precio_usd, 2),
+        base_shap=round(base, 4),
+        features=features,
+        resumen=resumen,
+    )
 
 
 def _base_no_disponible() -> HTTPException:
@@ -128,7 +253,7 @@ def crear_app(
         title="Real Estate Price Prediction API",
         description=(
             "Predicción de precios de propiedades (Argenprop) - "
-            "Predicción + oportunidades de compra (Fases 10 y 12)"
+            "Predicción + oportunidades de compra + Frontend (Fases 10, 12, Frontend)"
         ),
         version=VERSION,
         lifespan=lifespan,
@@ -137,6 +262,18 @@ def crear_app(
     # Rate limiting: 60 requests/min por IP en /predict, libre en /health.
     limiter = Limiter(key_func=get_remote_address)
     app.state.limiter = limiter
+
+    # Servir frontend como archivos estáticos
+    if FRONTEND_DIR.exists():
+        app.mount("/frontend", StaticFiles(directory=str(FRONTEND_DIR)), name="frontend")
+
+    @app.get("/")
+    async def root() -> FileResponse:
+        """Redirige al frontend."""
+        index_path = FRONTEND_DIR / "index.html"
+        if index_path.exists():
+            return FileResponse(str(index_path))
+        raise HTTPException(status_code=404, detail="Frontend no encontrado")
 
     @app.get("/health")
     def health() -> dict[str, object]:
@@ -216,6 +353,30 @@ def crear_app(
                 status_code=404, detail=f"No existe la oportunidad {id_publicacion}"
             )
         return oportunidad
+
+    @app.get("/oportunidades/{id_publicacion}/explain", response_model=ExplicacionPublicacion)
+    def explicar_oportunidad(id_publicacion: str) -> ExplicacionPublicacion:
+        """Explica por qué el modelo predijo ese precio para la publicación."""
+        modelo: ModeloPrediccion = app.state.modelo
+
+        try:
+            oportunidad = repositorio.obtener_oportunidad(app.state.db_engine, id_publicacion)
+        except (OperationalError, ProgrammingError):
+            raise _base_no_disponible() from None
+
+        if oportunidad is None:
+            raise HTTPException(
+                status_code=404, detail=f"No existe la oportunidad {id_publicacion}"
+            )
+
+        try:
+            return _construir_explicacion(modelo, oportunidad)
+        except Exception as exc:
+            logger.error("Error calculando explicación para %s: %s", id_publicacion, exc)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error calculando explicación: {exc}",
+            ) from exc
 
     return app
 

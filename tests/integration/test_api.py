@@ -140,7 +140,7 @@ class TestHealth:
         cuerpo = respuesta.json()
         assert cuerpo["estado"] == "ok"
         assert cuerpo["modelo"] == "xgboost"
-        assert cuerpo["version"] == "0.1.0"
+        assert cuerpo["version"] == "0.2.0"
         assert "metricas_xgboost_test" in cuerpo
 
     def test_health_reporta_metricas_del_bundle(self, client: TestClient) -> None:
@@ -257,6 +257,12 @@ FILAS_OPORTUNIDADES = pd.DataFrame(
             "diferencia_porcentual": -20.0,
             "clasificacion": "mala_compra",
             "fecha_prediccion": "2026-08-17",
+            "superficie_cubierta": 75.0,
+            "ambientes": 3.0,
+            "dormitorios": 2.0,
+            "banos": 2.0,
+            "antiguedad": 30.0,
+            "expensas_usd": 150.0,
         },
         {
             "id": "2",
@@ -271,6 +277,12 @@ FILAS_OPORTUNIDADES = pd.DataFrame(
             "diferencia_porcentual": 40.0,
             "clasificacion": "buena_compra",
             "fecha_prediccion": "2026-08-17",
+            "superficie_cubierta": 120.0,
+            "ambientes": 5.0,
+            "dormitorios": 3.0,
+            "banos": 2.0,
+            "antiguedad": 15.0,
+            "expensas_usd": 300.0,
         },
     ]
 )
@@ -351,3 +363,39 @@ class TestOportunidades:
             assert client.get("/oportunidades").status_code == 503
             assert client.get("/oportunidades/1").status_code == 503
             assert client.get("/health").status_code == 200
+
+
+class TestExplain:
+    def test_explicacion_basica(self, client_db: TestClient) -> None:
+        respuesta = client_db.get("/oportunidades/1/explain")
+
+        assert respuesta.status_code == 200
+        cuerpo = respuesta.json()
+        assert cuerpo["id"] == "1"
+        assert cuerpo["precio_predicho_usd"] > 0
+        assert "base_shap" in cuerpo
+        assert "features" in cuerpo
+        assert "resumen" in cuerpo
+        assert len(cuerpo["features"]) > 0
+
+    def test_explicacion_features_tienen_estructura_correcta(self, client_db: TestClient) -> None:
+        respuesta = client_db.get("/oportunidades/2/explain")
+        cuerpo = respuesta.json()
+
+        for feature in cuerpo["features"]:
+            assert "nombre" in feature
+            assert "valor" in feature
+            assert "contribucion" in feature
+            assert "contribucion_usd" in feature
+
+    def test_explicacion_id_inexistente_devuelve_404(self, client_db: TestClient) -> None:
+        respuesta = client_db.get("/oportunidades/999/explain")
+
+        assert respuesta.status_code == 404
+
+    def test_explicacion_ordenada_por_importancia(self, client_db: TestClient) -> None:
+        respuesta = client_db.get("/oportunidades/1/explain")
+        cuerpo = respuesta.json()
+
+        contribuciones = [abs(f["contribucion"]) for f in cuerpo["features"]]
+        assert contribuciones == sorted(contribuciones, reverse=True)

@@ -45,6 +45,13 @@ oportunidades = Table(
     Column("modelo_version", String(64)),
     Column("fecha_prediccion", String(32)),
     Column("actualizado_en", DateTime(timezone=True), server_default=func.now()),
+    # Raw features para explicabilidad SHAP por publicación
+    Column("superficie_cubierta", Float),
+    Column("ambientes", Float),
+    Column("dormitorios", Float),
+    Column("banos", Float),
+    Column("antiguedad", Float),
+    Column("expensas_usd", Float),
 )
 
 

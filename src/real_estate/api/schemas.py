@@ -82,3 +82,31 @@ class Oportunidad(BaseModel):
     modelo_version: str | None = Field(default=None, description="Versión del modelo que predijo")
     fecha_prediccion: str | None = Field(default=None, description="Fecha de la predicción (ISO)")
     actualizado_en: datetime | None = Field(default=None, description="Última actualización (ISO)")
+    # Raw features para explicabilidad
+    superficie_cubierta: float | None = Field(default=None, description="Superficie cubierta (m²)")
+    ambientes: float | None = Field(default=None, description="Cantidad de ambientes")
+    dormitorios: float | None = Field(default=None, description="Cantidad de dormitorios")
+    banos: float | None = Field(default=None, description="Cantidad de baños")
+    antiguedad: float | None = Field(default=None, description="Antigüedad (años)")
+    expensas_usd: float | None = Field(default=None, description="Expensas mensuales en USD")
+
+
+class ExplicacionFeature(BaseModel):
+    """Contribución SHAP de una feature individual."""
+
+    nombre: str = Field(description="Nombre de la feature")
+    valor: float = Field(description="Valor de la feature en la publicación")
+    contribucion: float = Field(description="Contribución SHAP al log_precio_usd")
+    contribucion_usd: float = Field(
+        description="Factor multiplicativo sobre el precio (exp(contrib))"
+    )
+
+
+class ExplicacionPublicacion(BaseModel):
+    """Explicabilidad SHAP de una publicación."""
+
+    id: str = Field(description="Id de la publicación")
+    precio_predicho_usd: float = Field(description="Precio predicho por el modelo")
+    base_shap: float = Field(description="Valor base del modelo (log precio de referencia)")
+    features: list[ExplicacionFeature] = Field(description="Contribuciones SHAP por feature")
+    resumen: str = Field(description="Resumen legible de la explicación")
