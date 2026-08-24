@@ -64,11 +64,9 @@ data/interim/*
 data/processed/*
 data/external/*
 
-# Keep directory structure
-!data/raw/.gitkeep
+# Keep directory structure for gitignored empty dirs
 !data/interim/.gitkeep
 !data/processed/.gitkeep
-!data/external/.gitkeep
 
 # Pointer files de DVC (versionan los datos; el contenido va al cache)
 !data/**/*.dvc
@@ -82,7 +80,6 @@ dvcstore/
 # ============================================================
 
 models/*
-!models/.gitkeep
 # Fingerprint del champion que dispara el CD (fase 13): se versiona a propósito
 !models/champion_actual.json
 
@@ -91,7 +88,6 @@ models/*
 # ============================================================
 
 mlruns/*
-!mlruns/.gitkeep
 
 # ============================================================
 # Reports generated locally
@@ -101,6 +97,7 @@ reports/figures/*
 reports/metrics/*
 reports/ofertas.csv
 
+# Keep directory structure for gitignored empty dirs
 !reports/figures/.gitkeep
 !reports/metrics/.gitkeep
 
