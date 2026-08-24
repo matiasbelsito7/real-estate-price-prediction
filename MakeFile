@@ -1,4 +1,4 @@
-.PHONY: help install install-dev scrape curate features train train-lineales tuning compare export-model publicar-champion etl evaluate explain serve docker-build docker-up docker-down docker-logs dvc-repro dvc-push dvc-pull dvc-status format lint typecheck test coverage check clean
+.PHONY: help install install-dev scrape curate features train train-lineales tuning compare export-model publicar-champion etl etl-scrape evaluate explain serve serve-api docker-build docker-up docker-down docker-logs dvc-repro dvc-push dvc-pull dvc-status format lint typecheck test coverage check clean
 
 
 # ============================================================
@@ -33,7 +33,9 @@ help:
 	@echo "  make export-model  Export serving bundle (scripts/exportar_modelo.py)"
 	@echo "  make publicar-champion  Publish champion + fingerprint CD (scripts/publicar_champion.py)"
 	@echo "  make etl           Run periodic ETL: scrape + predict + persist (Fase 12)"
-	@echo "  make serve         Run FastAPI prediction service (Fase 10)"
+	@echo "  make etl-scrape    Run ETL with scraping (todos los barrios de CABA)"
+	@echo "  make serve         Run FastAPI + Frontend (http://localhost:8000)"
+	@echo "  make serve-api     Run FastAPI only (no frontend, uvicorn default)"
 	@echo ""
 	@echo "  make docker-build  Build Docker image (Fase 11)"
 	@echo "  make docker-up     Start the API container (docker compose up -d)"
@@ -121,7 +123,15 @@ etl:
 	$(PYTHON) scripts/etl_oportunidades.py $(ARGS)
 
 
+etl-scrape:
+	$(PYTHON) scripts/etl_oportunidades.py --todos-los-barrios $(ARGS)
+
+
 serve:
+	uvicorn real_estate.api.app:app --reload --host 0.0.0.0 --port 8000
+
+
+serve-api:
 	uvicorn real_estate.api.app:app --reload
 
 
