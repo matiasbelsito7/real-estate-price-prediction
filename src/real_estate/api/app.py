@@ -34,6 +34,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, ProgrammingError
+from starlette.requests import Request
 
 from real_estate.api.config import ConfiguracionServicio
 from real_estate.api.schemas import (
@@ -162,7 +163,7 @@ def crear_app(
 
     @app.post("/predict", response_model=PrediccionSalida)
     @limiter.limit("60/minute")
-    def predecir(request: object, entrada: PropiedadEntrada) -> PrediccionSalida:
+    def predecir(request: Request, entrada: PropiedadEntrada) -> PrediccionSalida:
         modelo: ModeloPrediccion = app.state.modelo
 
         if entrada.tipo_propiedad.lower() not in TIPOS_PROPIEDAD_CONOCIDOS:

@@ -61,6 +61,8 @@ dev = [
 
     # Type stubs
     "pandas-stubs>=2.2,<3.0",
+    "types-PyYAML>=6.0,<7.0",
+    "types-requests>=2.0,<3.0",
 
     # Git hooks
     "pre-commit>=4.0,<5.0",
