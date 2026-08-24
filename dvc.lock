@@ -5,40 +5,40 @@ stages:
     deps:
     - path: data/raw/propiedades_argenprop.csv
       hash: md5
-      md5: 9bd76247394ea67d10d43f0dcfebde62
-      size: 3477612
+      md5: 98ca9b73182f8dedc0404ed4f4444cdc
+      size: 3771329
     - path: scripts/curate.py
       hash: md5
-      md5: 697efb247fa94dfc574321170efd2092
-      size: 1530
+      md5: 43939b27a1bf89f5013df4a8ab147658
+      size: 1733
     - path: src/real_estate/curation
       hash: md5
-      md5: 40645821047fc3ba9da0a5fc348b8423.dir
-      size: 42446
+      md5: 32891b470b3e2ec480eda20f9e39d49c.dir
+      size: 48141
       nfiles: 10
     outs:
     - path: data/processed/propiedades_argenprop_curado.csv
       hash: md5
-      md5: b7e51a42d82e956c7dd5ff177d985d61
-      size: 3527115
+      md5: 68044492a73c7afd4a3a4011bba9ebaa
+      size: 3824429
   features:
     cmd: python scripts/features.py
     deps:
     - path: data/processed/propiedades_argenprop_curado.csv
       hash: md5
-      md5: b7e51a42d82e956c7dd5ff177d985d61
-      size: 3527115
+      md5: 68044492a73c7afd4a3a4011bba9ebaa
+      size: 3824429
     - path: scripts/features.py
       hash: md5
-      md5: a4c1f1398847abf10980d363a5175cf9
-      size: 2421
+      md5: f171cfd8f21ac85d5c40123dfca594ab
+      size: 2684
     - path: src/real_estate/features
       hash: md5
-      md5: 16a1e86d572332d6ebfdbab9714509a9.dir
-      size: 23911
+      md5: 33298aaddfe2ad3e72862dadc282f60f.dir
+      size: 24547
       nfiles: 6
     outs:
     - path: data/processed/propiedades_argenprop_features.csv
       hash: md5
-      md5: 85bbe63db861cc0be83928bf466a7d1b
-      size: 172412
+      md5: 8f9939019756710ab6222376f629946d
+      size: 184584
